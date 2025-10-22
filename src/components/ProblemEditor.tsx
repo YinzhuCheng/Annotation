@@ -61,7 +61,7 @@ export function ProblemEditor() {
   };
 
   const ensureLLM = (): boolean => {
-    if (!llm.apiKey?.trim() || !llm.model?.trim()) {
+    if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
       alert(`${t('llmMissingTitle')}: ${t('llmMissingBody')}`);
       // Scroll to config area
       document.querySelector('.label')?.scrollIntoView({ behavior: 'smooth' });

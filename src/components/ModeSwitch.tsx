@@ -20,7 +20,7 @@ export function ModeSwitch() {
         <button
           className={mode === 'agent' ? 'primary' : ''}
           onClick={() => {
-            if (!llm.apiKey?.trim() || !llm.model?.trim()) {
+            if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
               alert(`${t('llmMissingTitle')}: ${t('llmMissingBody')}`);
             }
             setMode('agent');
