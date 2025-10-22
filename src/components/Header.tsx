@@ -6,7 +6,7 @@ export function Header({ onHelp, onToggleLang }: { onHelp: () => void; onToggleL
     <header>
       <div className="row">
         <span className="badge">Local-First</span>
-        <strong>LLM-Assisted Annotation</strong>
+        <strong>{t('title')}</strong>
       </div>
       <div className="row">
         <button onClick={onToggleLang}>{t('language')}</button>

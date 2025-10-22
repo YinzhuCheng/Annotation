@@ -1,7 +1,15 @@
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export function HelpModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>

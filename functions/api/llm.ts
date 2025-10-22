@@ -8,6 +8,10 @@ export const onRequestPost: PagesFunction = async (context) => {
       extra?: { temperature?: number; maxTokens?: number };
     };
 
+    if (!llm?.apiKey || !llm?.model || !llm?.provider) {
+      return new Response(JSON.stringify({ error: 'Missing LLM configuration (provider, apiKey, model)' }), { status: 400 });
+    }
+
     if (llm.provider === 'openai') {
       const url = (llm.baseUrl?.trim() || 'https://api.openai.com/v1') + '/chat/completions';
       const r = await fetch(url, {

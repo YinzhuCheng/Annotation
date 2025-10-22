@@ -5,6 +5,7 @@ export function ModeSwitch() {
   const { t } = useTranslation();
   const mode = useAppStore((s) => s.mode);
   const setMode = useAppStore((s) => s.setMode);
+  const llm = useAppStore((s) => s.llm);
 
   return (
     <div>
@@ -18,7 +19,12 @@ export function ModeSwitch() {
         </button>
         <button
           className={mode === 'agent' ? 'primary' : ''}
-          onClick={() => setMode('agent')}
+          onClick={() => {
+            if (!llm.apiKey?.trim() || !llm.model?.trim()) {
+              alert(`${t('llmMissingTitle')}: ${t('llmMissingBody')}`);
+            }
+            setMode('agent');
+          }}
         >
           {t('agentMode')}
         </button>

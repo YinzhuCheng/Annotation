@@ -58,7 +58,16 @@ const resources = {
       helpTitle: 'Program Overview',
       newProblem: 'New Problem',
       saveProblem: 'Save Problem',
-      selectSubfieldHint: 'Select multiple subfields; they will be joined with semicolons.'
+      selectSubfieldHint: 'Select multiple subfields; they will be joined with semicolons.',
+      testLLM: 'Test LLM',
+      yourMessage: 'Your message',
+      send: 'Send',
+      llmReply: 'LLM Reply',
+      llmError: 'LLM Error',
+      llmMissingTitle: 'LLM configuration required',
+      llmMissingBody: 'Please enter API Key and Model for the selected provider in the LLM Configuration.',
+      openLLMConfig: 'Open LLM Configuration',
+      dismiss: 'Dismiss'
     }
   },
   zh: {
@@ -117,7 +126,16 @@ const resources = {
       helpTitle: '功能概览',
       newProblem: '新建题目',
       saveProblem: '保存题目',
-      selectSubfieldHint: '可多次选择多个分支领域，最终以分号拼接。'
+      selectSubfieldHint: '可多次选择多个分支领域，最终以分号拼接。',
+      testLLM: '测试 LLM',
+      yourMessage: '你的消息',
+      send: '发送',
+      llmReply: 'LLM 回复',
+      llmError: 'LLM 错误',
+      llmMissingTitle: '需要配置 LLM',
+      llmMissingBody: '请在 LLM 配置中填写对应服务商的 API Key 与模型。',
+      openLLMConfig: '打开 LLM 配置',
+      dismiss: '关闭'
     }
   }
 };

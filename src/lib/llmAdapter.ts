@@ -8,7 +8,10 @@ export async function chat(messages: ChatMessage[], llm: LLMConfigState, extra?:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, llm, extra })
   });
-  if (!res.ok) throw new Error(`LLM error: ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(()=> '');
+    throw new Error(`LLM error ${res.status}: ${text}`);
+  }
   const data = await res.json();
   return data.text ?? '';
 }

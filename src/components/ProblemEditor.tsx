@@ -60,9 +60,20 @@ export function ProblemEditor() {
     update({ question: ocrText });
   };
 
+  const ensureLLM = (): boolean => {
+    if (!llm.apiKey?.trim() || !llm.model?.trim()) {
+      alert(`${t('llmMissingTitle')}: ${t('llmMissingBody')}`);
+      // Scroll to config area
+      document.querySelector('.label')?.scrollIntoView({ behavior: 'smooth' });
+      return false;
+    }
+    return true;
+  };
+
   const fixLatex = async (field: 'question' | 'answer') => {
     const text = (current as any)[field] as string;
     if (!text?.trim()) return;
+    if (!ensureLLM()) return;
     const corrected = await latexCorrection(text, llm);
     update({ [field]: corrected } as any);
   };
@@ -70,6 +81,7 @@ export function ProblemEditor() {
   const generate = async () => {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
+    if (!ensureLLM()) return;
     const patch = await generateProblemFromText(input, current.questionType, llm);
     update(patch);
   };
