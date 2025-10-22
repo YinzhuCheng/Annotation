@@ -1,8 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-const saved = localStorage.getItem('lang') || 'en';
-
 const resources = {
   en: {
     translation: {
@@ -33,8 +31,7 @@ const resources = {
       type_hint: 'It is better not to include proof questions for now. They can be collected later in bulk without manual annotation.',
       generate: 'Generate with LLM',
       latexFix: 'LaTeX Correction',
-      latexFixHint: 'This will convert nonstandard symbols (e.g., ℤ) into LaTeX (e.g., \\
- \\mathbb{Z}).',
+      latexFixHint: 'This will convert nonstandard symbols (e.g., ℤ) into LaTeX (e.g., \\mathbb{Z}).',
       subfield: 'Subfield',
       subfield_others: 'Others (custom)',
       source: 'Source',
@@ -125,13 +122,16 @@ const resources = {
   }
 };
 
-await i18n
-  .use(initReactI18next)
-  .init({
-    resources,
-    lng: saved,
-    fallbackLng: 'en',
-    interpolation: { escapeValue: false }
-  });
+export function initI18n() {
+  const saved = typeof window !== 'undefined' ? (localStorage.getItem('lang') || 'en') : 'en';
+  return i18n
+    .use(initReactI18next)
+    .init({
+      resources,
+      lng: saved,
+      fallbackLng: 'en',
+      interpolation: { escapeValue: false }
+    });
+}
 
 export default i18n;
