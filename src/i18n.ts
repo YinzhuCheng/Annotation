@@ -12,7 +12,7 @@ const resources = {
       agentBanner: 'LLM mode supports automatic text extraction. You can upload a problem image or paste a screenshot; the system will automatically extract the text.',
       llmConfig: 'LLM Configuration',
       apiKey: 'API Key',
-      baseUrl: 'Base URL',
+      baseUrl: 'Base URL (required)',
       model: 'Model',
       provider: 'Provider',
       provider_openai: 'OpenAI-compatible',
@@ -65,7 +65,7 @@ const resources = {
       llmReply: 'LLM Reply',
       llmError: 'LLM Error',
       llmMissingTitle: 'LLM configuration required',
-      llmMissingBody: 'Please enter API Key and Model for the selected provider in the LLM Configuration.',
+      llmMissingBody: 'Please enter API Key, Model, and Base URL in the LLM Configuration.',
       openLLMConfig: 'Open LLM Configuration',
       dismiss: 'Dismiss'
     }
@@ -80,7 +80,7 @@ const resources = {
       agentBanner: 'LLM 模式支持自动文字提取。你可以上传题目图片或粘贴截图，系统将自动提取文本。',
       llmConfig: 'LLM 配置',
       apiKey: 'API Key（仅保存在本地）',
-      baseUrl: 'Base URL（可选，OpenAI 兼容）',
+      baseUrl: 'Base URL（必填）',
       model: '模型',
       provider: '服务商',
       provider_openai: 'OpenAI 兼容',
@@ -133,7 +133,7 @@ const resources = {
       llmReply: 'LLM 回复',
       llmError: 'LLM 错误',
       llmMissingTitle: '需要配置 LLM',
-      llmMissingBody: '请在 LLM 配置中填写对应服务商的 API Key 与模型。',
+      llmMissingBody: '请在 LLM 配置中填写 API Key、模型与 Base URL。',
       openLLMConfig: '打开 LLM 配置',
       dismiss: '关闭'
     }

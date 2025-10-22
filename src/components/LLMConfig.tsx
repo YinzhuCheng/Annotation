@@ -70,7 +70,7 @@ export function LLMConfig() {
         <button onClick={async ()=>{
           setErr(''); setReply('');
           try {
-            if (!llm.apiKey?.trim() || !llm.model?.trim()) {
+            if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
               throw new Error(t('llmMissingBody'));
             }
             const text = await chat([{ role:'user', content: testMsg }], llm);
