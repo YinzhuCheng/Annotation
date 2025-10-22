@@ -12,13 +12,54 @@ export const onRequestPost: PagesFunction = async (context) => {
       return new Response(JSON.stringify({ error: 'Missing LLM configuration (provider, apiKey, model)' }), { status: 400 });
     }
 
-    if (llm.provider === 'openai') {
-      const url = (llm.baseUrl?.trim() || 'https://api.openai.com/v1') + '/chat/completions';
+    // If a custom baseUrl is provided, treat it as an OpenAI-compatible gateway (OAI mode)
+    const baseUrl = (llm.baseUrl || '').trim();
+    const isOpenAICompatible = baseUrl.length > 0;
+
+    if (isOpenAICompatible) {
+      const base = baseUrl.replace(/\/+$/, '');
+      const url = `${base}/chat/completions`;
+      const payload = {
+        model: llm.model,
+        messages,
+        temperature: extra?.temperature ?? 0,
+        max_tokens: extra?.maxTokens ?? 1024,
+        stream: false
+      } as any;
       const r = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${llm.apiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        return new Response(JSON.stringify({ error: errText || `HTTP ${r.status}` }), { status: r.status });
+      }
+      // Try to parse JSON; if it fails, surface the raw text for debugging
+      let j: any;
+      try {
+        j = await r.json();
+      } catch (e: any) {
+        const raw = await r.text().catch(() => '');
+        return new Response(JSON.stringify({ error: raw || (e?.message || 'Non-JSON response from OpenAI-compatible endpoint') }), { status: 500 });
+      }
+      const text = j?.choices?.[0]?.message?.content || '';
+      return new Response(JSON.stringify({ text }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (llm.provider === 'openai') {
+      const base = 'https://api.openai.com/v1';
+      const url = `${base}/chat/completions`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${llm.apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
         body: JSON.stringify({
           model: llm.model,
@@ -65,7 +106,7 @@ export const onRequestPost: PagesFunction = async (context) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(llm.model)}:generateContent?key=${encodeURIComponent(llm.apiKey)}`;
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: joined }] }],
           generationConfig: { temperature: extra?.temperature ?? 0 }
