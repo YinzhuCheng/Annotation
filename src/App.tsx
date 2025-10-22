@@ -6,6 +6,7 @@ import { ModeSwitch } from './components/ModeSwitch';
 import { LLMConfig } from './components/LLMConfig';
 import { ProblemEditor } from './components/ProblemEditor';
 import { ImportExport } from './components/ImportExport';
+import { ImageComposer } from './components/ImageComposer';
 import { useAppStore } from './state/store';
 import { estimateStorage } from './lib/storage';
 
@@ -60,6 +61,10 @@ export default function App() {
 
         <div className="card" style={{marginTop: 16}}>
           <ProblemEditor />
+        </div>
+
+        <div className="card" style={{marginTop: 16}}>
+          <ImageComposer />
         </div>
       </div>
 
