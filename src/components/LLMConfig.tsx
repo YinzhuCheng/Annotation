@@ -59,9 +59,7 @@ export function LLMConfig() {
       </div>
       <div className="row" style={{marginTop: 8, justifyContent:'space-between'}}>
         <button onClick={save}>{t('save')}</button>
-        {mode === 'agent' && (
-          <span className="small" style={{opacity:0.8}}>{t('agentBanner')}</span>
-        )}
+        <span className="small" style={{opacity:0.8}}>{t('agentBanner')}</span>
       </div>
 
       <hr className="div" />

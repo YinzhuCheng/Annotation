@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord } from '../state/store';
-import { latexCorrection } from '../lib/llmAdapter';
-import Tesseract from 'tesseract.js';
+import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
+import { getImageBlob } from '../lib/db';
 import { generateProblemFromText } from '../lib/generator';
 
 const SUBFIELDS = [
@@ -51,8 +51,22 @@ export function ProblemEditor() {
 
   const runOCR = async () => {
     if (!current?.image) return;
-    const result = await Tesseract.recognize(current.image, 'eng');
-    setOcrText(result.data.text || '');
+    if (!ensureLLM()) return;
+    let blob: Blob | undefined;
+    try {
+      if (current.image.startsWith('images/')) {
+        blob = await getImageBlob(current.image) as Blob | undefined;
+      } else {
+        const r = await fetch(current.image);
+        blob = await r.blob();
+      }
+    } catch {}
+    if (!blob) {
+      alert('Image not available for OCR.');
+      return;
+    }
+    const text = await ocrWithLLM(blob, llm);
+    setOcrText(text);
   };
 
   const applyOcrText = () => {

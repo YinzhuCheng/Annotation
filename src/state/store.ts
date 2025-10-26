@@ -41,7 +41,7 @@ const initialLLM: LLMConfigState = (() => {
   return { provider: 'openai', apiKey: '', baseUrl: '', model: '' };
 })();
 
-const initialMode: Mode = (localStorage.getItem('mode') as Mode) || 'manual';
+const initialMode: Mode = 'agent';
 
 const emptyProblem = (): ProblemRecord => ({
   id: `${Date.now()}`,
@@ -60,8 +60,9 @@ const emptyProblem = (): ProblemRecord => ({
 export const useAppStore = create<AppState>((set, get) => ({
   mode: initialMode,
   setMode: (m) => {
-    localStorage.setItem('mode', m);
-    set({ mode: m });
+    // Mode switching disabled; always agent
+    localStorage.setItem('mode', 'agent');
+    set({ mode: 'agent' });
   },
   llm: initialLLM,
   setLLM: (p) => {

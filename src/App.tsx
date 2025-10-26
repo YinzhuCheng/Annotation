@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Header } from './components/Header';
 import { HelpModal } from './components/HelpModal';
-import { ModeSwitch } from './components/ModeSwitch';
+// import { ModeSwitch } from './components/ModeSwitch';
 import { LLMConfig } from './components/LLMConfig';
 import { ProblemEditor } from './components/ProblemEditor';
 import { ImportExport } from './components/ImportExport';
@@ -47,10 +47,8 @@ export default function App() {
 
         <div className="grid grid-2">
           <div className="card">
-            <ModeSwitch />
-            {mode === 'agent' && (
-              <div className="badge" style={{display:'block', marginTop: 12}}>{t('agentBanner')}</div>
-            )}
+            {/* ModeSwitch removed; default to agent mode */}
+            <div className="badge" style={{display:'block', marginTop: 12}}>{t('agentBanner')}</div>
             <LLMConfig />
           </div>
 

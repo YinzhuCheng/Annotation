@@ -12,7 +12,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
           <h3 style={{margin:0}}>{t('helpTitle')}</h3>
           <button onClick={onClose}>✕</button>
@@ -23,8 +23,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
             <h4 style={{marginTop:0}}>English</h4>
             <ul className="list">
               <li>Local-first; data stays in your browser (localStorage/IndexedDB/OPFS).</li>
-              <li>Manual and LLM Agent modes; switch anytime and state auto-saves.</li>
-              <li>Agent mode: paste/upload images, client-side OCR with Tesseract.js.</li>
+              <li>LLM Agent is the default; no mode switching required.</li>
+              <li>Paste/upload images; OCR is performed by your configured LLM (Vision-capable).</li>
               <li>Unified LLM adapter (OpenAI-compatible, Gemini, Claude) via a Cloudflare Pages Function proxy.</li>
               <li>Generate Multiple Choice / Fill-in-the-blank / Proof; auto-fill attributes.</li>
               <li>Images composed client-side into a single JPG under images/&lt;timestamp&gt;.jpg.</li>
@@ -38,8 +38,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
             <h4 style={{marginTop:0}}>中文</h4>
             <ul className="list">
               <li>本地优先；数据仅保存在浏览器（localStorage/IndexedDB/OPFS）。</li>
-              <li>支持手动模式与 LLM 代理模式；可随时切换并自动保存状态。</li>
-              <li>代理模式：支持粘贴/上传图片，使用 Tesseract.js 在本地执行 OCR。</li>
+              <li>默认使用 LLM 代理，无需在模式间切换。</li>
+              <li>支持粘贴/上传图片，OCR 由你配置的 LLM（具备视觉能力）执行。</li>
               <li>统一 LLM 适配（OpenAI 兼容、Gemini、Claude），通过 Cloudflare Pages 函数代理。</li>
               <li>可生成选择题/填空题/证明题，并自动补全主要属性。</li>
               <li>图片在本地合成为单张 JPG，路径为 images/&lt;timestamp&gt;.jpg。</li>
