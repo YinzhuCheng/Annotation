@@ -12,12 +12,18 @@ import { estimateStorage } from './lib/storage';
 
 export default function App() {
   const { t, i18n } = useTranslation();
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState<boolean>(() => typeof window !== 'undefined' && window.location.hash === '#help');
   const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
   const { mode } = useAppStore();
 
   useEffect(() => {
     estimateStorage().then(setStorageInfo).catch(() => setStorageInfo(null));
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => setShowHelp(window.location.hash === '#help');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
   const onToggleLang = () => {
@@ -28,7 +34,7 @@ export default function App() {
 
   return (
     <>
-      <Header onHelp={() => setShowHelp(true)} onToggleLang={onToggleLang} />
+      <Header onHelp={() => { window.location.hash = '#help'; }} onToggleLang={onToggleLang} />
       <div className="container">
         <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
           <h2>{t('title')}</h2>
@@ -66,7 +72,7 @@ export default function App() {
         </div>
       </div>
 
-      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpModal onClose={() => { if (window.location.hash === '#help') { history.back(); } else { setShowHelp(false); } }} />}
     </>
   );
 }
