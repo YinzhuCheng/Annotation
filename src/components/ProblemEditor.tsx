@@ -23,6 +23,7 @@ export function ProblemEditor() {
   const [ocrText, setOcrText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
+  const customSourceInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!current) return;
@@ -250,15 +251,39 @@ export function ProblemEditor() {
                   ))}
                 </div>
               )}
+              {/* Display the final joined result */}
+              <div className="row" style={{gap:8, width:'100%'}}>
+                <span className="small">Result:</span>
+                <input style={{flex:1, minWidth:240}} value={current.subfield} readOnly />
+              </div>
               <span className="small">{t('selectSubfieldHint')}</span>
             </div>
           </div>
 
           <div style={{marginTop:12}}>
             <div className="label">{t('source')}</div>
-            <select value={current.source} onChange={(e)=> update({ source: e.target.value })}>
-              {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+              <select
+                value={SOURCES.includes(current.source) ? current.source : ''}
+                onChange={(e)=>{
+                  const v = e.target.value;
+                  if (v === 'Others') {
+                    update({ source: '' });
+                    setTimeout(()=> customSourceInputRef.current?.focus(), 0);
+                  } else {
+                    update({ source: v });
+                  }
+                }}
+              >
+                {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <input
+                ref={customSourceInputRef}
+                placeholder={'Others (custom)'}
+                value={current.source}
+                onChange={(e)=> update({ source: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginTop:12}}>
