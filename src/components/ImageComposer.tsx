@@ -135,7 +135,11 @@ export function ImageComposer() {
   const compose = async () => {
     setIsComposing(true);
     try {
+      // Logical layout width for measurement/display; actual canvas is scaled for high-DPI export
       const targetWidth = 1000;
+      const deviceScaleRaw = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+      // Cap scale to avoid excessive memory usage; ensure at least 2x for crisp zooming
+      const outputScale = Math.max(2, Math.min(3, Math.round(deviceScaleRaw)));
       const padding = 24;
       const gap = 16;
       const optionGap = 12;
@@ -221,9 +225,11 @@ export function ImageComposer() {
       totalHeight += padding; // bottom padding
 
       const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = Math.max(1, Math.round(totalHeight));
+      canvas.width = Math.round(targetWidth * outputScale);
+      canvas.height = Math.max(1, Math.round(totalHeight * outputScale));
       const ctx = canvas.getContext('2d')!;
+      // Draw in logical units and scale up for high-resolution export
+      ctx.scale(outputScale, outputScale);
 
       // white background
       ctx.fillStyle = '#ffffff';
@@ -329,7 +335,7 @@ export function ImageComposer() {
         }
       }
 
-      const blob = await new Promise<Blob>((resolve) => canvas.toBlob(b => resolve(b || new Blob()), 'image/jpeg', 0.92));
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob(b => resolve(b || new Blob()), 'image/jpeg', 0.95));
       const path = await saveImageBlob(blob);
       setComposedPath(path);
       const url = URL.createObjectURL(blob);
@@ -432,7 +438,7 @@ export function ImageComposer() {
             <span className="badge">{t('preview')}</span>
           </div>
           <div className="row" style={{justifyContent:'flex-end', margin:'6px 0'}}>
-            <button onClick={()=> openViewerWindow(previewUrl, { title: t('viewLarge'), back: t('back') })}>{t('viewLarge')}</button>
+            <button onClick={()=> openViewerWindow(previewUrl, { title: t('viewLarge'), back: t('back'), zoomHint: t('zoomHint') })}>{t('viewLarge')}</button>
           </div>
           <img className="preview" src={previewUrl} />
           <div className="row" style={{gap:8, marginTop:8}}>

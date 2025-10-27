@@ -16,8 +16,9 @@ export function Header({ onHelp, onToggleLang }: { onHelp: () => void; onToggleL
   return (
     <header>
       <div className="row">
+        <img src="/logo.svg" alt="Logo" width={28} height={28} style={{display:'inline-block'}} />
         <span className="badge">{t('localFirst')}</span>
-        <strong>{t('title')}</strong>
+        <strong style={{display:'inline-flex', alignItems:'center'}}>{t('title')}</strong>
       </div>
       <div className="row">
         <button onClick={() => {
