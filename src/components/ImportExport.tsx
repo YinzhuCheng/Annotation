@@ -13,6 +13,7 @@ const HEADER = [
 export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem } = useAppStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const exportXlsx = async () => {
     // Build rows; Image column should contain the intended exported filename (<id>.jpg) when present
@@ -182,23 +183,32 @@ export function ImportExport() {
     <div className="row" style={{gap:8}}>
       <button onClick={exportXlsx}>{t('exportXlsx')}</button>
       <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDrop} style={{padding:'8px 12px'}}>
-        <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
-          <label className="row" style={{gap:8, alignItems:'center'}}>
-            <input type="file" accept=".xlsx" style={{display:'none'}} onChange={(e)=> {
+        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx"
+            style={{display:'none'}}
+            onChange={(e)=>{
               const f = e.target.files?.[0];
               if (f) importXlsx(f);
-            }} />
-            <button>{t('importXlsx')}</button>
-          </label>
-          <label className="row" style={{gap:8, alignItems:'center'}}>
-            <input ref={folderInputRef} type="file" accept=".xlsx" style={{display:'none'}} multiple onChange={(e)=>{
+            }}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
+            accept=".xlsx"
+            multiple
+            style={{display:'none'}}
+            onChange={(e)=>{
               const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
               files.forEach(f => importXlsx(f));
-            }} />
-            <button>{t('importXlsxFolder')}</button>
-          </label>
+            }}
+          />
+          <button onClick={()=> fileInputRef.current?.click()}>{t('importXlsx')}</button>
+          <button onClick={()=> folderInputRef.current?.click()}>{t('importXlsxFolder')}</button>
+          <span className="small">Drag & drop .xlsx files or folders to import</span>
         </div>
-        <span className="small">Drag & drop .xlsx files or folders to import</span>
       </div>
     </div>
   );
