@@ -19,12 +19,32 @@ export function ProblemEditor() {
   const { t } = useTranslation();
   const store = useAppStore();
   const llm = useAppStore((s)=> s.llm);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
   const currentIndex = useMemo(() => store.problems.findIndex(p => p.id === store.currentId), [store.problems, store.currentId]);
-  const hasPrev = currentIndex >= 0 && currentIndex < store.problems.length - 1;
-  const hasNext = currentIndex > 0;
-  const goPrev = () => { if (hasPrev) store.upsertProblem({ id: store.problems[currentIndex + 1].id }); };
-  const goNext = () => { if (hasNext) store.upsertProblem({ id: store.problems[currentIndex - 1].id }); };
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0; // enable Next; will create new at tail if needed
+  const commitCurrent = () => {
+    // Touch-save current problem so edits are persisted before navigation
+    store.upsertProblem({ id: current.id });
+    setSavedAt(Date.now());
+  };
+  const goPrev = () => {
+    if (!hasPrev) return;
+    commitCurrent();
+    store.upsertProblem({ id: store.problems[currentIndex - 1].id });
+  };
+  const goNext = () => {
+    if (!hasNext) return;
+    commitCurrent();
+    const isLast = currentIndex === store.problems.length - 1;
+    if (isLast) {
+      const newId = `${Date.now()}`;
+      store.upsertProblem({ id: newId }); // creates a new problem at the tail and jumps to it
+    } else {
+      store.upsertProblem({ id: store.problems[currentIndex + 1].id });
+    }
+  };
   const [ocrText, setOcrText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
@@ -35,6 +55,12 @@ export function ProblemEditor() {
   }, [current]);
 
   const update = (patch: Partial<ProblemRecord>) => store.upsertProblem({ id: current.id, ...patch });
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const timer = setTimeout(() => setSavedAt(null), 1500);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
 
   const onAddImage = async (file: File) => {
     // For MVP we just create a local object URL and remember it in image field
@@ -154,12 +180,13 @@ export function ProblemEditor() {
       <div className="row" style={{justifyContent:'space-between'}}>
         <div className="row" style={{gap:8}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
-          <button onClick={() => store.upsertProblem({})}>{t('saveProblem')}</button>
+          <button onClick={() => { store.upsertProblem({}); setSavedAt(Date.now()); }}>{t('saveProblem')}</button>
         </div>
         <div className="row" style={{gap:8}}>
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
-          <button onClick={goNext} disabled={!hasNext}>{t('next')}</button>
+          <button onClick={goNext}>{t('next')}</button>
           <span className="small">ID: {current.id}</span>
+          {savedAt && <span className="badge">{t('saved')}</span>}
         </div>
       </div>
 
