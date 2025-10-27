@@ -26,3 +26,8 @@ export async function saveImageBlob(blob: Blob): Promise<string> {
 export async function getImageBlob(path: string): Promise<Blob | undefined> {
   return db.images.get(path).then((r) => r?.blob);
 }
+
+// Save an image blob at a specified path (e.g., images/<id>.jpg)
+export async function saveImageBlobAtPath(path: string, blob: Blob): Promise<void> {
+  await db.images.put({ path, blob });
+}

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
-import { getImageBlob } from '../lib/db';
+import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
 
 const HEADER = [
@@ -15,6 +15,7 @@ export function ImportExport() {
   const { problems, upsertProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
+  const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
 
   const exportXlsx = async () => {
     // Build rows; Image column should contain the intended exported filename (<id>.jpg) when present
@@ -52,32 +53,65 @@ export function ImportExport() {
       (ws as any)[cellAddr] = { t: 's', v, l: { Target: `images/${v}`, Tooltip: v } };
     }
     const xlsxArrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([xlsxArrayBuffer as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    downloadBlob(blob, `dataset-${Date.now()}.xlsx`);
+  };
 
-    // Package XLSX and images together into a single zip
+  // Export both XLSX and images into a single zip (Datasets)
+  const exportDatasets = async () => {
+    const rows = problems.map(p => ([
+      p.id,
+      p.question,
+      p.questionType,
+      (p.questionType === 'Multiple Choice') ? (JSON.stringify(
+        (p.options?.length===5 ? p.options : ['', '', '', '', '']).map((opt, i) => {
+          const label = String.fromCharCode(65 + i);
+          const trimmed = String(opt || '').trim();
+          if (!trimmed) return '';
+          const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
+          return hasPrefix ? trimmed : `${label}: ${trimmed}`;
+        })
+      )) : '',
+      p.answer,
+      p.subfield,
+      p.source,
+      p.image ? `${p.id}.jpg` : '',
+      p.image ? 1 : 0,
+      p.academicLevel,
+      p.difficulty,
+    ]));
+    const ws = XLSX.utils.aoa_to_sheet([HEADER, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    const imageColIndex = HEADER.indexOf('Image');
+    for (let i = 0; i < problems.length; i++) {
+      const p = problems[i];
+      if (!p.image) continue;
+      const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex });
+      const v = `${p.id}.jpg`;
+      (ws as any)[cellAddr] = { t: 's', v, l: { Target: `images/${v}`, Tooltip: v } };
+    }
+    const xlsxArrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
     const zip = new JSZip();
     zip.file('dataset.xlsx', xlsxArrayBuffer as ArrayBuffer);
-
-    // Add images as images/<id>.jpg when available
     for (const p of problems) {
       if (!p.image) continue;
       try {
         let blob: Blob | undefined;
         if (p.image.startsWith('images/')) {
-          blob = await getImageBlob(p.image) as Blob | undefined;
+          blob = (await getImageBlob(p.image)) as Blob | undefined;
         } else {
           const r = await fetch(p.image);
           blob = await r.blob();
         }
-        if (blob) {
-          zip.file(`images/${p.id}.jpg`, blob);
-        }
+        if (blob) zip.file(`images/${p.id}.jpg`, blob);
       } catch {
-        // ignore missing blobs
+        // ignore
       }
     }
-
-    const outZip = await zip.generateAsync({ type: 'blob' });
-    downloadBlob(outZip, `dataset-${Date.now()}.zip`);
+    const out = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(out, `datasets-${Date.now()}.zip`);
   };
 
   const exportImages = async () => {
@@ -147,6 +181,24 @@ export function ImportExport() {
     return count;
   };
 
+  // Import images from dropped files/folders; filenames must be <id>.jpg or .jpeg
+  const importImagesFromFiles = async (files: File[]): Promise<number> => {
+    let count = 0;
+    const setById = new Set(problems.map(p => p.id));
+    for (const f of files) {
+      const name = f.name.toLowerCase();
+      if (!(name.endsWith('.jpg') || name.endsWith('.jpeg'))) continue;
+      const id = name.replace(/\.(jpg|jpeg)$/i, '');
+      if (!setById.has(id)) continue; // only update existing problems
+      const path = `images/${id}.jpg`;
+      await saveImageBlobAtPath(path, f);
+      // update problem to point to this image
+      upsertProblem({ id, image: path });
+      count++;
+    }
+    return count;
+  };
+
   // Collect dropped files, supporting folders via webkit entries
   const collectDroppedFiles = async (items: DataTransferItemList): Promise<File[]> => {
     const filePromises: Promise<File[]>[] = [];
@@ -191,7 +243,7 @@ export function ImportExport() {
     return [];
   };
 
-  const onDrop = async (e: React.DragEvent) => {
+  const onDropXlsx = async (e: React.DragEvent) => {
     e.preventDefault();
     const dropped = await collectDroppedFiles(e.dataTransfer.items);
     const files = dropped.filter(f => f.name.toLowerCase().endsWith('.xlsx'));
@@ -201,13 +253,24 @@ export function ImportExport() {
     }
     if (total > 0) setImportedCount(total);
   };
-  // Folder selection button removed; dropzone still supports dropping folders.
+
+  const onDropImages = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const dropped = await collectDroppedFiles(e.dataTransfer.items);
+    const files = dropped.filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+    const c = await importImagesFromFiles(files);
+    if (c > 0) setImportedImagesCount(c);
+  };
 
   return (
-    <div className="row" style={{gap:8}}>
-      <button onClick={exportXlsx}>{t('exportXlsx')}</button>
-      <button onClick={exportImages}>{t('exportImages')}</button>
-      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDrop} style={{padding:'8px 12px'}}>
+    <div className="grid" style={{gap:12, gridTemplateColumns:'1fr'}}>
+      <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+        <button onClick={exportXlsx}>{t('exportXlsx')}</button>
+        <button onClick={exportImages}>{t('exportImages')}</button>
+        <button onClick={exportDatasets}>{t('exportDatasets')}</button>
+      </div>
+
+      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropXlsx} style={{padding:'8px 12px'}}>
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
           <input
             ref={fileInputRef}
@@ -223,12 +286,43 @@ export function ImportExport() {
             }}
           />
           <button onClick={()=> fileInputRef.current?.click()}>{t('importXlsx')}</button>
-          <span className="small">Drag & drop .xlsx files or folders to import</span>
+          <span className="small">{t('importXlsxHint')}</span>
           {importedCount !== null && (
             <span className="small" style={{ marginLeft: 8 }}>
               {t('importSuccess', { count: importedCount })}
             </span>
           )}
+        </div>
+      </div>
+
+      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropImages} style={{padding:'8px 12px'}}>
+        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+          {(() => {
+            let dirEl: HTMLInputElement | null = null;
+            return (
+              <>
+                <input
+                  type="file"
+                  style={{display:'none'}}
+                  multiple
+                  ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }}
+                  accept="image/jpeg,image/jpg"
+                  onChange={async (e)=>{
+                    const files = Array.from(e.target.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+                    const c = await importImagesFromFiles(files);
+                    if (c > 0) setImportedImagesCount(c);
+                  }}
+                />
+                <button onClick={()=> dirEl?.click()}>{t('importImages')}</button>
+                <span className="small">{t('importImagesHint')}</span>
+                {importedImagesCount !== null && (
+                  <span className="small" style={{ marginLeft: 8 }}>
+                    {t('importImagesSuccess', { count: importedImagesCount })}
+                  </span>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
