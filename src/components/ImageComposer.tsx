@@ -262,13 +262,17 @@ export function ImageComposer() {
           const groups = enforceMinArea(baseGroups);
 
           let optIdx = 0;
+          let drawnRowLabelForThisBlock = false; // only draw "Image N" for first row
           for (const g of groups) {
             const drawWidth = targetWidth - padding * 2;
             let rowH = 0;
-            // Row label per row group
-            ctx.fillStyle = '#000000';
-            ctx.font = `${rowLabelFontSize}px sans-serif`;
-            ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+            // Draw row label only once for the first row in this options block
+            if (!drawnRowLabelForThisBlock) {
+              ctx.fillStyle = '#000000';
+              ctx.font = `${rowLabelFontSize}px sans-serif`;
+              ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+              drawnRowLabelForThisBlock = true;
+            }
 
             if (g <= 1) {
               const file = present[optIdx] as Blob;
@@ -353,10 +357,12 @@ export function ImageComposer() {
             {b.type === 'single' ? (
               <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>
                 <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
-                  <input type="file" accept="image/*" onChange={(e)=>{
+                  {/* Hide native file input to avoid OS-language labels */}
+                  <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                     const f = e.target.files?.[0];
                     if (f) setFile(b.id, 0, f);
                   }} />
+                  <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
                   {(() => {
                     let dirEl: HTMLInputElement | null = null;
                     return (
@@ -367,11 +373,11 @@ export function ImageComposer() {
                           const f = files[0];
                           if (f) setFile(b.id, 0, f);
                         }} />
-                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                        <button onClick={()=> dirEl?.click()}>{t('folder')}</button>
                       </>
                     );
                   })()}
-                  <span className="small">Drag & drop or choose an image</span>
+                  <span className="small">{t('dragDropOrChooseImage')}</span>
                 </div>
               </div>
             ) : (
@@ -380,10 +386,11 @@ export function ImageComposer() {
                   {[0,1,2,3,4].map(i => (
                     <div key={i}>
                       <div className="small">({String.fromCharCode(65 + i)})</div>
-                      <input type="file" accept="image/*" onChange={(e)=>{
+                      <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                         const f = e.target.files?.[0];
                         if (f) setFile(b.id, i, f);
                       }} />
+                      <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
                     </div>
                   ))}
                 </div>
@@ -406,11 +413,11 @@ export function ImageComposer() {
                     return (
                       <>
                         <input type="file" style={{display:'none'}} multiple ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }} onChange={onDirChange} />
-                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                        <button onClick={()=> dirEl?.click()}>{t('folder')}</button>
                       </>
                     );
                   })()}
-                  <span className="small">Drag & drop multiple images (A–E) or pick a folder</span>
+                  <span className="small">{t('dragDropMultipleOrPickFolder')}</span>
                 </div>
               </div>
             )}
@@ -422,6 +429,9 @@ export function ImageComposer() {
         <div style={{marginTop:12}}>
           <div className="row" style={{gap:8}}>
             <span className="badge">{t('preview')}</span>
+          </div>
+          <div className="row" style={{justifyContent:'flex-end', margin:'6px 0'}}>
+            <button onClick={()=> window.open(previewUrl, '_blank')}>{t('viewLarge')}</button>
           </div>
           <img className="preview" src={previewUrl} />
           <div className="row" style={{gap:8, marginTop:8}}>

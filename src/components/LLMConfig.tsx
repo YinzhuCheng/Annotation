@@ -57,9 +57,8 @@ export function LLMConfig() {
           onChange={(e) => setLLM({ baseUrl: e.target.value })}
         />
       </div>
-      <div className="row" style={{marginTop: 8, justifyContent:'space-between'}}>
+      <div className="row" style={{marginTop: 8, justifyContent:'flex-start', gap:8}}>
         <button onClick={save}>{t('save')}</button>
-        <span className="small" style={{opacity:0.8}}>{t('agentBanner')}</span>
       </div>
 
       <hr className="div" />
