@@ -136,7 +136,7 @@ export function ProblemEditor() {
   const ensureOptionsForMC = () => {
     if (current.questionType === 'Multiple Choice') {
       if (!current.options || current.options.length !== 5) {
-        update({ options: ['A','B','C','D','E'] });
+        update({ options: ['', '', '', '', ''] });
       }
     }
   };
@@ -217,12 +217,12 @@ export function ProblemEditor() {
             <div style={{marginTop:12}}>
               <div className="label">{t('options')}</div>
               <div className="options-grid">
-                {['A','B','C','D','E'].map((k, idx) => (
-                  <input key={k} value={current.options[idx] || ''} onChange={(e)=>{
+                {[0,1,2,3,4].map((i, idx) => (
+                  <input key={i} value={current.options[idx] || ''} onChange={(e)=>{
                     const next = [...(current.options||[])];
                     next[idx] = e.target.value;
                     update({ options: next });
-                  }} placeholder={k} />
+                  }} placeholder={String.fromCharCode(65 + idx)} />
                 ))}
               </div>
             </div>
