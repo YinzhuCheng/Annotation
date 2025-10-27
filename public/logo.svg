@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LLM logo">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9fd3ff"/>
+      <stop offset="1" stop-color="#6ca8ff"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="#2c3e50" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Brain outline -->
+    <path d="M168 88c-56 0-96 40-96 96 0 25 9 48 25 66-11 21-10 47 4 68 15 23 41 36 68 36h62V88h-63z" fill="url(#g1)"/>
+    <path d="M344 88c56 0 96 40 96 96 0 25-9 48-25 66 11 21 10 47-4 68-15 23-41 36-68 36h-62V88h63z" fill="url(#g1)"/>
+    <!-- Circuit lines on left -->
+    <path d="M168 140v184"/>
+    <path d="M144 172h48"/>
+    <path d="M144 212h48"/>
+    <circle cx="144" cy="172" r="10" fill="#2c3e50"/>
+    <circle cx="144" cy="212" r="10" fill="#2c3e50"/>
+    <circle cx="168" cy="140" r="10" fill="#2c3e50"/>
+    <!-- Circuit lines on right -->
+    <path d="M344 140v184"/>
+    <path d="M320 192h48"/>
+    <path d="M320 236h48"/>
+    <circle cx="368" cy="192" r="10" fill="#2c3e50"/>
+    <circle cx="368" cy="236" r="10" fill="#2c3e50"/>
+    <circle cx="344" cy="140" r="10" fill="#2c3e50"/>
+    <!-- Pen nib -->
+    <path d="M256 368l48 96-48-24-48 24 48-96z" fill="#2c3e50" stroke="#2c3e50"/>
+  </g>
+</svg>

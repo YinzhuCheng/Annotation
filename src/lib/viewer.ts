@@ -28,16 +28,17 @@ export function openViewerWindow(
   <title>${title}</title>
   <style>
     :root { color-scheme: light dark; }
-    [data-theme="dark"] { --bg:#0b0c10; --fg:#eaecee; --border:#2b2f36; --surface:#0f1218; --accent:#3b82f6; --button:#12151b; }
-    [data-theme="light"] { --bg:#ffffff; --fg:#0b0c10; --border:#e5e7eb; --surface:#f8fafc; --accent:#3b82f6; --button:#ffffff; }
+    /* Layered surfaces for better depth */
+    [data-theme="dark"] { --bg:#0b0c10; --fg:#eaecee; --border:#2b2f36; --surface:#0f1218; --surface-2:#12151b; --accent:#6c8cff; --button:#12151b; }
+    [data-theme="light"] { --bg:#f5f7fb; --fg:#0b0c10; --border:#d9dfeb; --surface:#ffffff; --surface-2:#f1f4f9; --accent:#3b82f6; --button:#ffffff; }
     html,body { height:100%; }
     body { margin:0; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; }
-    header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:10; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:10; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
     a.btn { display:inline-block; padding:6px 10px; text-decoration:none; border-radius:8px; }
     a.btn.ghost { background:var(--button); color:var(--fg); border:1px solid var(--border); }
     main { height: calc(100vh - 48px); }
     #viewport { position:relative; height:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; background:var(--bg); }
-    #img { max-width: min(96vw, 1600px); max-height: 90vh; object-fit: contain; border-radius: 8px; border:1px solid var(--border); will-change: transform; transform-origin: 0 0; user-select: none; cursor: grab; }
+    #img { max-width: min(96vw, 2400px); max-height: 90vh; object-fit: contain; border-radius: 8px; border:1px solid var(--border); will-change: transform; transform-origin: 0 0; user-select: none; cursor: grab; image-rendering: auto; }
     #img.grabbing { cursor: grabbing; }
   </style></head><body>
   <header>
@@ -69,7 +70,7 @@ export function openViewerWindow(
         return { x: px, y: py };
       }
 
-      vp.addEventListener('wheel', function(e){
+      function handleWheel(e){
         if (!e.ctrlKey) return; // only intercept ctrl+wheel
         e.preventDefault();
         const k = Math.exp(-e.deltaY * 0.002); // zoom factor
@@ -83,7 +84,10 @@ export function openViewerWindow(
         ty = pt.y - (pt.y - ty) * (next / prev);
         scale = next;
         apply();
-      }, { passive: false });
+      }
+      vp.addEventListener('wheel', handleWheel, { passive: false });
+      // Prevent browser page-zoom in new window by also listening on window
+      window.addEventListener('wheel', function(e){ if (e.ctrlKey) { e.preventDefault(); handleWheel(e); } }, { passive: false });
 
       // Drag to pan
       let dragging = false; let sx = 0, sy = 0, stx = 0, sty = 0;
@@ -97,14 +101,26 @@ export function openViewerWindow(
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
 
-      // Double click to reset
-      vp.addEventListener('dblclick', function(){ scale = 1; tx = 0; ty = 0; apply(); });
+      // Double click to reset / toggle zoom
+      vp.addEventListener('dblclick', function(e){
+        const rect = img.getBoundingClientRect();
+        const cx = e.clientX - rect.left; const cy = e.clientY - rect.top;
+        if (scale < 2) {
+          const prev = scale; const next = 2;
+          tx = cx - (cx - tx) * (next / prev);
+          ty = cy - (cy - ty) * (next / prev);
+          scale = next;
+        } else { scale = 1; tx = 0; ty = 0; }
+        apply();
+      });
 
       // Back button
       document.getElementById('backBtn').addEventListener('click', function(e){ e.preventDefault(); if (history.length > 1) { history.back(); } else { window.close(); } });
 
       // Prevent image native drag ghost
       img.addEventListener('dragstart', function(e){ e.preventDefault(); });
+      // Prefer high quality scaling during zooming
+      try { img.style.imageRendering = 'auto'; } catch {}
 
       apply();
     })();
