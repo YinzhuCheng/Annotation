@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Help</title>
+    <style>
+      :root { --bg: #0f172a; --fg: #e5e7eb; --muted:#94a3b8; --border:#334155; --accent:#6c8cff; }
+      html, body { height: 100%; }
+      body { margin:0; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; }
+      .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+      .card { background: rgba(255,255,255,0.02); border:1px solid var(--border); border-radius: 12px; padding: 16px; }
+      .row { display:flex; justify-content: space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+      .muted { color: var(--muted); font-size: 12px; }
+      h1, h2, h3, h4 { margin: 8px 0; }
+      ul { margin: 8px 0 0 16px; }
+      a.btn { display:inline-block; padding:8px 12px; background: var(--accent); color:#fff; text-decoration:none; border-radius:8px; }
+      .ghost { background: transparent; color: var(--fg); border:1px solid var(--border); }
+      .space { height: 16px; }
+      @media (prefers-color-scheme: light) {
+        :root { --bg:#f8fafc; --fg:#0f172a; --muted:#334155; --border:#cbd5e1; --accent:#4f46e5; }
+        .card { background: #fff; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="row">
+        <h2 style="margin:0">Help / 帮助</h2>
+        <div class="row">
+          <a class="btn ghost" href="/">← Back</a>
+        </div>
+      </div>
+      <div class="space"></div>
+      <div class="card">
+        <div class="row">
+          <h3 style="margin:0">English</h3>
+        </div>
+        <ul>
+          <li>Local-first; data stays in your browser (localStorage/IndexedDB/OPFS).</li>
+          <li>LLM Agent is the default; no mode switching required.</li>
+          <li>Paste/upload images; OCR is performed by your configured LLM (Vision-capable).</li>
+          <li>Unified LLM adapter (OpenAI-compatible, Gemini, Claude) via a Cloudflare Pages Function proxy.</li>
+          <li>Generate Multiple Choice / Fill-in-the-blank / Proof; auto-fill attributes.</li>
+          <li>Images composed client-side into a single JPG under images/&lt;timestamp&gt;.jpg.</li>
+          <li>LaTeX Correction converts symbols like ℤ into \mathbb{Z}.</li>
+          <li>Import/Export dataset to XLSX with the specified header.</li>
+          <li>Storage usage and quota shown; cache remains across reloads.</li>
+          <li>Privacy: API keys/config live only in your browser; no server storage.</li>
+        </ul>
+      </div>
+      <div class="space"></div>
+      <div class="card">
+        <div class="row">
+          <h3 style="margin:0">中文</h3>
+        </div>
+        <ul>
+          <li>本地优先；数据仅保存在浏览器（localStorage/IndexedDB/OPFS）。</li>
+          <li>默认使用 LLM 代理，无需在模式间切换。</li>
+          <li>支持粘贴/上传图片，OCR 由你配置的 LLM（具备视觉能力）执行。</li>
+          <li>统一 LLM 适配（OpenAI 兼容、Gemini、Claude），通过 Cloudflare Pages 函数代理。</li>
+          <li>可生成选择题/填空题/证明题，并自动补全主要属性。</li>
+          <li>图片在本地合成为单张 JPG，路径为 images/&lt;timestamp&gt;.jpg。</li>
+          <li>LaTeX 纠正：将 ℤ 等符号转换为合法 LaTeX（如 \mathbb{Z}）。</li>
+          <li>按指定表头导入/导出 XLSX。</li>
+          <li>显示存储用量与配额；刷新后仍能恢复。</li>
+          <li>隐私：API Key 与配置仅在本地使用，不经服务器保存。</li>
+        </ul>
+      </div>
+    </div>
+    <script>
+      // allow back to previous page if navigated via hash or link
+      if (document.referrer && document.referrer !== location.href) {
+        const back = document.querySelector('a.btn.ghost');
+        back?.addEventListener('click', function(e){
+          e.preventDefault(); history.back();
+        });
+      }
+    </script>
+  </body>
+</html>
