@@ -191,14 +191,16 @@ export function ImageComposer() {
           const groups = enforceMinArea(baseGroups);
 
           let optIdx = 0;
+          let isFirstGroup = true;
           for (const g of groups) {
             let rowHeight = 0;
+            const topOffset = (isFirstGroup ? rowLabelLineHeight : 0);
             if (g <= 1) {
               // single option full width
               const u = URL.createObjectURL(present[optIdx] as Blob);
               const img = await readImage(u);
               const scale = drawWidthFull / img.width;
-              rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
+              rowHeight = Math.max(rowHeight, img.height * scale + topOffset + colLabelLineHeight);
               URL.revokeObjectURL(u);
               optIdx += 1;
             } else {
@@ -208,12 +210,13 @@ export function ImageComposer() {
                 const u = URL.createObjectURL(present[optIdx + i] as Blob);
                 const img = await readImage(u);
                 const scale = colWidth / img.width;
-                rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
+                rowHeight = Math.max(rowHeight, img.height * scale + topOffset + colLabelLineHeight);
                 URL.revokeObjectURL(u);
               }
               optIdx += g;
             }
             totalHeight += rowHeight + gap;
+            isFirstGroup = false;
           }
         }
       }
@@ -262,13 +265,16 @@ export function ImageComposer() {
           const groups = enforceMinArea(baseGroups);
 
           let optIdx = 0;
+          let isFirstGroup = true;
           for (const g of groups) {
             const drawWidth = targetWidth - padding * 2;
             let rowH = 0;
-            // Row label per row group
-            ctx.fillStyle = '#000000';
-            ctx.font = `${rowLabelFontSize}px sans-serif`;
-            ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+            // Row label only for first group in options block
+            if (isFirstGroup) {
+              ctx.fillStyle = '#000000';
+              ctx.font = `${rowLabelFontSize}px sans-serif`;
+              ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+            }
 
             if (g <= 1) {
               const file = present[optIdx] as Blob;
@@ -281,9 +287,10 @@ export function ImageComposer() {
               const label = String.fromCharCode(65 + optIdx);
               ctx.fillStyle = '#000000';
               ctx.font = `${colLabelFontSize}px sans-serif`;
-              ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
-              ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, drawWidth, h);
-              rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
+              const topOffset = isFirstGroup ? rowLabelLineHeight : 0;
+              ctx.fillText(`(${label})`, x, y + topOffset + Math.round(colLabelFontSize * 0.8));
+              ctx.drawImage(img, x, y + topOffset + colLabelLineHeight, drawWidth, h);
+              rowH = Math.max(rowH, h + topOffset + colLabelLineHeight);
               URL.revokeObjectURL(url);
               optIdx += 1;
             } else {
@@ -298,19 +305,22 @@ export function ImageComposer() {
                 const label = String.fromCharCode(65 + optIdx + i);
                 ctx.fillStyle = '#000000';
                 ctx.font = `${colLabelFontSize}px sans-serif`;
-                ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
-                ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, colWidth, h);
-                rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
+                const topOffset = isFirstGroup ? rowLabelLineHeight : 0;
+                ctx.fillText(`(${label})`, x, y + topOffset + Math.round(colLabelFontSize * 0.8));
+                ctx.drawImage(img, x, y + topOffset + colLabelLineHeight, colWidth, h);
+                rowH = Math.max(rowH, h + topOffset + colLabelLineHeight);
                 URL.revokeObjectURL(url);
               }
               optIdx += g;
             }
 
             y += rowH + gap;
-            rowIndex += 1;
+            isFirstGroup = false;
 
             // separator line except after last group within block is handled below via bi check
           }
+          // Increment image index once per options block
+          rowIndex += 1;
         }
         // separator line except after last
         if (bi < blocks.length - 1) {
@@ -353,25 +363,27 @@ export function ImageComposer() {
             {b.type === 'single' ? (
               <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>
                 <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
-                  <input type="file" accept="image/*" onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) setFile(b.id, 0, f);
-                  }} />
                   {(() => {
+                    let fileEl: HTMLInputElement | null = null;
                     let dirEl: HTMLInputElement | null = null;
                     return (
                       <>
+                        <input type="file" accept="image/*" style={{display:'none'}} ref={(el)=>{ fileEl = el; }} onChange={(e)=>{
+                          const f = e.target.files?.[0];
+                          if (f) setFile(b.id, 0, f);
+                        }} />
                         <input type="file" style={{display:'none'}} multiple ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }} onChange={(e)=>{
                           const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
                           files.sort((a, b) => a.name.localeCompare(b.name));
                           const f = files[0];
                           if (f) setFile(b.id, 0, f);
                         }} />
-                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                        <button onClick={()=> fileEl?.click()}>{t('browse')}</button>
+                        <button onClick={()=> dirEl?.click()}>{t('folder')}</button>
                       </>
                     );
                   })()}
-                  <span className="small">Drag & drop or choose an image</span>
+                  <span className="small">{t('dropHintSingle')}</span>
                 </div>
               </div>
             ) : (
@@ -380,10 +392,18 @@ export function ImageComposer() {
                   {[0,1,2,3,4].map(i => (
                     <div key={i}>
                       <div className="small">({String.fromCharCode(65 + i)})</div>
-                      <input type="file" accept="image/*" onChange={(e)=>{
-                        const f = e.target.files?.[0];
-                        if (f) setFile(b.id, i, f);
-                      }} />
+                      {(() => {
+                        let fileEl: HTMLInputElement | null = null;
+                        return (
+                          <>
+                            <input type="file" accept="image/*" style={{display:'none'}} ref={(el)=>{ fileEl = el; }} onChange={(e)=>{
+                              const f = e.target.files?.[0];
+                              if (f) setFile(b.id, i, f);
+                            }} />
+                            <button onClick={()=> fileEl?.click()}>{t('browse')}</button>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -406,11 +426,11 @@ export function ImageComposer() {
                     return (
                       <>
                         <input type="file" style={{display:'none'}} multiple ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }} onChange={onDirChange} />
-                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                        <button onClick={()=> dirEl?.click()}>{t('folder')}</button>
                       </>
                     );
                   })()}
-                  <span className="small">Drag & drop multiple images (A–E) or pick a folder</span>
+                  <span className="small">{t('dropHintOptions')}</span>
                 </div>
               </div>
             )}
@@ -424,7 +444,8 @@ export function ImageComposer() {
             <span className="badge">{t('preview')}</span>
           </div>
           <img className="preview" src={previewUrl} />
-          <div className="row" style={{gap:8, marginTop:8}}>
+          <div className="row" style={{gap:8, marginTop:8, justifyContent:'space-between'}}>
+            <button onClick={()=> window.open(`/image-viewer.html?lang=${encodeURIComponent(String((t as any).i18n?.language || 'en'))}&src=${encodeURIComponent(previewUrl)}`, '_blank')}>{t('viewLarge')}</button>
             <button onClick={()=> setPreviewUrl('')}>{t('regenerate')}</button>
             <button className="primary" disabled={!composedPath} onClick={()=> { update({ id: problem.id, image: composedPath }); }}>{t('confirmImage')}</button>
           </div>

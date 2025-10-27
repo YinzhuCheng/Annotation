@@ -46,7 +46,6 @@ export default function App() {
         <div className="card">
           <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
             <div className="label">{t('settingsBlock')}</div>
-            <div className="badge" style={{marginTop: 12}}>{t('agentBanner')}</div>
           </div>
           <LLMConfig />
           <hr className="div" />
