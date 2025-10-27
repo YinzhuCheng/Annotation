@@ -29,7 +29,10 @@ export default function App() {
       <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
       <div className="container">
         <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
-          <h2>{t('title')}</h2>
+          <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+            <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+            {t('title')}
+          </h2>
           <div className="row small">
             <span>{t('storage')}:</span>
             {storageInfo ? (

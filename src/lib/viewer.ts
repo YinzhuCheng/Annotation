@@ -28,16 +28,18 @@ export function openViewerWindow(
   <title>${title}</title>
   <style>
     :root { color-scheme: light dark; }
-    [data-theme="dark"] { --bg:#0b0c10; --fg:#eaecee; --border:#2b2f36; --surface:#0f1218; --accent:#3b82f6; --button:#12151b; }
-    [data-theme="light"] { --bg:#ffffff; --fg:#0b0c10; --border:#e5e7eb; --surface:#f8fafc; --accent:#3b82f6; --button:#ffffff; }
+    /* Tuned palette for better layering */
+    [data-theme="dark"] { --bg:#0b1220; --fg:#e5e7eb; --border:#223045; --surface:#0f172a; --accent:#6c8cff; --button:#111827; }
+    [data-theme="light"] { --bg:#f6f9ff; --fg:#0b1220; --border:#d6e0f2; --surface:#ffffff; --accent:#3b82f6; --button:#ffffff; }
     html,body { height:100%; }
     body { margin:0; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; }
     header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:10; }
     a.btn { display:inline-block; padding:6px 10px; text-decoration:none; border-radius:8px; }
     a.btn.ghost { background:var(--button); color:var(--fg); border:1px solid var(--border); }
     main { height: calc(100vh - 48px); }
-    #viewport { position:relative; height:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; background:var(--bg); }
-    #img { max-width: min(96vw, 1600px); max-height: 90vh; object-fit: contain; border-radius: 8px; border:1px solid var(--border); will-change: transform; transform-origin: 0 0; user-select: none; cursor: grab; }
+    #viewport { position:relative; height:100%; overflow:hidden; background:var(--bg); }
+    /* Keep the <img> at its natural pixel size; we handle fitting via transforms for crispness */
+    #img { width:auto; height:auto; max-width:none; max-height:none; border-radius: 8px; border:1px solid var(--border); will-change: transform; transform-origin: 0 0; user-select: none; cursor: grab; }
     #img.grabbing { cursor: grabbing; }
   </style></head><body>
   <header>
@@ -54,51 +56,69 @@ export function openViewerWindow(
     (function(){
       const img = document.getElementById('img');
       const vp = document.getElementById('viewport');
-      let scale = 1;
-      let tx = 0, ty = 0;
-      const minScale = 0.5, maxScale = 12;
+      let baseScale = 1; // fit-to-screen scale relative to natural pixels
+      let scale = 1;     // current absolute scale relative to natural pixels
+      let tx = 0, ty = 0; // translation in CSS pixels (pre-scale space)
+      let minScale = 0.1, maxScale = 16;
 
       function apply(){
         img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
       }
 
-      function clientPointToImageLocal(x, y){
-        const rect = img.getBoundingClientRect();
-        const px = x - rect.left;
-        const py = y - rect.top;
-        return { x: px, y: py };
+      function computeFit(){
+        const vw = vp.clientWidth, vh = vp.clientHeight;
+        const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+        if (!iw || !ih || !vw || !vh) return;
+        baseScale = Math.min(vw / iw, vh / ih);
+        // Keep current zoom centered around viewport center when recomputing
+        const cx = vw / 2; const cy = vh / 2;
+        const prev = scale || baseScale;
+        scale = baseScale;
+        tx = cx - (iw * scale) / 2;
+        ty = cy - (ih * scale) / 2;
+        minScale = Math.max(0.05, baseScale * 0.25);
+        maxScale = Math.max(8, baseScale * 16);
+        apply();
       }
 
+      function clientToLocal(x, y){
+        const rect = vp.getBoundingClientRect();
+        const px = x - rect.left; // point inside viewport
+        const py = y - rect.top;
+        // Convert to image local space (pre-scale) using inverse transform
+        const localX = (px - tx) / scale;
+        const localY = (py - ty) / scale;
+        return { x: localX, y: localY };
+      }
+
+      // Zoom with Ctrl+Wheel (also allow Meta for some platforms)
       vp.addEventListener('wheel', function(e){
-        if (!e.ctrlKey) return; // only intercept ctrl+wheel
+        if (!e.ctrlKey && !e.metaKey) return;
         e.preventDefault();
-        const k = Math.exp(-e.deltaY * 0.002); // zoom factor
+        const k = Math.exp(-e.deltaY * 0.002);
         const prev = scale;
         let next = prev * k;
         if (next < minScale) next = minScale;
         if (next > maxScale) next = maxScale;
-        const pt = clientPointToImageLocal(e.clientX, e.clientY);
-        // keep cursor point stable after zoom: t' = p - (p - t) * (s'/s)
-        tx = pt.x - (pt.x - tx) * (next / prev);
-        ty = pt.y - (pt.y - ty) * (next / prev);
+        const pt = clientToLocal(e.clientX, e.clientY); // in image local space
+        // Maintain cursor position: new translation so that local pt maps back to same client point
+        tx = e.clientX - vp.getBoundingClientRect().left - pt.x * next;
+        ty = e.clientY - vp.getBoundingClientRect().top - pt.y * next;
         scale = next;
         apply();
       }, { passive: false });
 
       // Drag to pan
       let dragging = false; let sx = 0, sy = 0, stx = 0, sty = 0;
-      function onDown(e){
-        if (e.button !== 0) return;
-        dragging = true; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty; img.classList.add('grabbing');
-      }
+      function onDown(e){ if (e.button !== 0) return; dragging = true; sx = e.clientX; sy = e.clientY; stx = tx; sty = ty; img.classList.add('grabbing'); }
       function onMove(e){ if (!dragging) return; tx = stx + (e.clientX - sx); ty = sty + (e.clientY - sy); apply(); }
       function onUp(){ dragging = false; img.classList.remove('grabbing'); }
       vp.addEventListener('mousedown', onDown);
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
 
-      // Double click to reset
-      vp.addEventListener('dblclick', function(){ scale = 1; tx = 0; ty = 0; apply(); });
+      // Double-click to reset fit-to-screen
+      vp.addEventListener('dblclick', function(){ computeFit(); });
 
       // Back button
       document.getElementById('backBtn').addEventListener('click', function(e){ e.preventDefault(); if (history.length > 1) { history.back(); } else { window.close(); } });
@@ -106,7 +126,9 @@ export function openViewerWindow(
       // Prevent image native drag ghost
       img.addEventListener('dragstart', function(e){ e.preventDefault(); });
 
-      apply();
+      // Recompute fit after image load and on resize
+      if (img.complete) computeFit(); else img.addEventListener('load', computeFit);
+      window.addEventListener('resize', computeFit);
     })();
   </script>
   </body></html>`);

@@ -1,7 +1,26 @@
 * { box-sizing: border-box; }
 :root { color-scheme: light dark; }
-[data-theme="dark"] { --bg: #0b0c10; --fg: #eaecee; --muted: #99a3ad; --accent: #6c8cff; --border: #2b2f36; --surface:#0f1218; --btn-bg:#12151b; --header: rgba(11,12,16,0.9); }
-[data-theme="light"] { --bg: #ffffff; --fg: #0b0c10; --muted: #4b5563; --accent: #3b82f6; --border: #e5e7eb; --surface:#ffffff; --btn-bg:#ffffff; --header: rgba(255,255,255,0.9); }
+/* Refined layered palette for better contrast and depth */
+[data-theme="dark"] {
+  --bg: #0b1220;         /* page background: deep navy */
+  --fg: #e5e7eb;         /* foreground text */
+  --muted: #9aa7bd;      /* secondary text */
+  --accent: #6c8cff;     /* primary accent */
+  --border: #223045;     /* subtle borders */
+  --surface:#0f172a;     /* cards/surfaces */
+  --btn-bg:#111827;      /* buttons and inputs */
+  --header: rgba(15,23,42,0.92); /* sticky header bg */
+}
+[data-theme="light"] {
+  --bg: #f6f9ff;         /* soft bluish background */
+  --fg: #0b1220;         /* foreground text */
+  --muted: #52617a;      /* secondary text */
+  --accent: #3b82f6;     /* primary accent */
+  --border: #d6e0f2;     /* subtle borders */
+  --surface:#ffffff;     /* cards/surfaces */
+  --btn-bg:#ffffff;      /* buttons and inputs */
+  --header: rgba(255,255,255,0.92); /* sticky header bg */
+}
 body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, Apple Color Emoji, Segoe UI Emoji; background: var(--bg); color: var(--fg); }
 header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); position: sticky; top:0; background: var(--header); backdrop-filter: blur(6px); z-index:10; }
 button, select, input, textarea { background:var(--btn-bg); border:1px solid var(--border); color:var(--fg); border-radius:8px; padding:8px 10px; }
