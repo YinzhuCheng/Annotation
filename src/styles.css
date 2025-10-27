@@ -8,7 +8,10 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .grid { display:grid; gap:16px; }
 .grid-2 { grid-template-columns: 1fr 1fr; }
-.options-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.options-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.options-grid input { width: 100%; }
+/* Make the 5th (E) option span full row */
+.options-grid > *:nth-child(5) { grid-column: 1 / -1; }
 .card { border:1px solid var(--border); border-radius:12px; padding:16px; background:#0f1218; overflow:hidden; }
 .label { display:block; margin-bottom:6px; color: var(--muted); font-size: 12px; }
 .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
@@ -34,9 +37,9 @@ input[type="file"] { max-width: 100%; }
 /* Responsive layout */
 @media (max-width: 1024px) {
   .grid-2 { grid-template-columns: 1fr; }
-  .options-grid { grid-template-columns: repeat(3, 1fr); }
+  .options-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 640px) {
-  .options-grid { grid-template-columns: repeat(2, 1fr); }
+  .options-grid { grid-template-columns: repeat(1, 1fr); }
 }

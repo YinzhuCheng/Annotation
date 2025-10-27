@@ -20,6 +20,11 @@ export function ProblemEditor() {
   const store = useAppStore();
   const llm = useAppStore((s)=> s.llm);
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
+  const currentIndex = useMemo(() => store.problems.findIndex(p => p.id === store.currentId), [store.problems, store.currentId]);
+  const hasPrev = currentIndex >= 0 && currentIndex < store.problems.length - 1;
+  const hasNext = currentIndex > 0;
+  const goPrev = () => { if (hasPrev) store.upsertProblem({ id: store.problems[currentIndex + 1].id }); };
+  const goNext = () => { if (hasNext) store.upsertProblem({ id: store.problems[currentIndex - 1].id }); };
   const [ocrText, setOcrText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
@@ -151,7 +156,11 @@ export function ProblemEditor() {
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
           <button onClick={() => store.upsertProblem({})}>{t('saveProblem')}</button>
         </div>
-        <span className="small">ID: {current.id}</span>
+        <div className="row" style={{gap:8}}>
+          <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
+          <button onClick={goNext} disabled={!hasNext}>{t('next')}</button>
+          <span className="small">ID: {current.id}</span>
+        </div>
       </div>
 
       <hr className="div" />
