@@ -43,22 +43,21 @@ export default function App() {
           </div>
         </div>
 
-        <div className="grid grid-2">
-          <div className="card">
-            <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
-              <div className="label">{t('settingsBlock')}</div>
-              <div className="badge" style={{marginTop: 12}}>{t('agentBanner')}</div>
-            </div>
-            <LLMConfig />
-            <hr className="div" />
-            <ImportExport />
+        <div className="card">
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+            <div className="label">{t('settingsBlock')}</div>
+            <div className="badge" style={{marginTop: 12}}>{t('agentBanner')}</div>
           </div>
-
-          <div className="card">
-            <div className="label">{t('problemsBlock')}</div>
-            <ProblemEditor />
-          </div>
+          <LLMConfig />
+          <hr className="div" />
+          <ImportExport />
         </div>
+
+        <div className="card" style={{marginTop:16}}>
+          <div className="label">{t('problemsBlock')}</div>
+          <ProblemEditor />
+        </div>
+
         <div className="card" style={{marginTop: 16}}>
           <ImageComposer />
         </div>

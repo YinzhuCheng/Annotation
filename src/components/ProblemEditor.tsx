@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord } from '../state/store';
 import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
+import { getImageBlob } from '../lib/db';
 import { generateProblemFromText } from '../lib/generator';
 
 const SUBFIELDS = [
@@ -47,6 +48,7 @@ export function ProblemEditor() {
   const [ocrText, setOcrText] = useState('');
   const [ocrImage, setOcrImage] = useState<Blob | null>(null);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>('');
+  const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +57,26 @@ export function ProblemEditor() {
   useEffect(() => {
     if (!current) return;
   }, [current]);
+
+  // When a composed image is confirmed in Images module, show preview in Problems
+  useEffect(() => {
+    let revokeUrl: string | null = null;
+    (async () => {
+      if (current.image) {
+        const blob = await getImageBlob(current.image);
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          revokeUrl = url;
+          setConfirmedImageUrl(url);
+        } else {
+          setConfirmedImageUrl('');
+        }
+      } else {
+        setConfirmedImageUrl('');
+      }
+    })();
+    return () => { if (revokeUrl) URL.revokeObjectURL(revokeUrl); };
+  }, [current.image]);
 
   const update = (patch: Partial<ProblemRecord>) => store.upsertProblem({ id: current.id, ...patch });
 
@@ -234,6 +256,15 @@ export function ProblemEditor() {
         </div>
 
         <div>
+          {confirmedImageUrl && (
+            <div className="card" style={{marginBottom:12}}>
+              <div className="row" style={{gap:8}}>
+                <span className="badge">Image attached</span>
+                <span className="small">Image_dependency=1</span>
+              </div>
+              <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
+            </div>
+          )}
           <div className="label">{t('uploadImage')}</div>
           <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
             <div className="row" style={{justifyContent:'center', gap:8}}>
