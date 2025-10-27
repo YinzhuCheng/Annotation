@@ -9,7 +9,7 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .grid { display:grid; gap:16px; }
 .grid-2 { grid-template-columns: 1fr 1fr; }
 .options-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.card { border:1px solid var(--border); border-radius:12px; padding:16px; background:#0f1218; }
+.card { border:1px solid var(--border); border-radius:12px; padding:16px; background:#0f1218; overflow:hidden; }
 .label { display:block; margin-bottom:6px; color: var(--muted); font-size: 12px; }
 .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
 .badge { display:inline-block; padding:3px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color: var(--muted); }
@@ -21,7 +21,15 @@ textarea { width:100%; min-height:120px; resize: vertical; }
 .list { list-style:none; padding-left: 16px; }
 .list li { margin: 8px 0; }
 .dropzone { padding: 24px; border: 1px dashed var(--border); text-align:center; border-radius: 12px; }
-img.preview { max-width: 100%; border-radius: 8px; border:1px solid var(--border); }
+img.preview { max-width: 100%; max-height: 60vh; height: auto; object-fit: contain; border-radius: 8px; border:1px solid var(--border); }
+
+/* Prevent grid/flex children from causing overflow due to intrinsic min-width */
+.grid > * { min-width: 0; }
+.grid-2 > * { min-width: 0; }
+.row > * { min-width: 0; }
+
+/* Make file inputs not overflow narrow containers */
+input[type="file"] { max-width: 100%; }
 
 /* Responsive layout */
 @media (max-width: 1024px) {
