@@ -254,7 +254,7 @@ export function ProblemEditor() {
               {/* Display the final joined result */}
               <div className="row" style={{gap:8, width:'100%'}}>
                 <span className="small">Result:</span>
-                <input style={{flex:1, minWidth:240}} value={current.subfield} readOnly />
+                <input style={{flex:1, minWidth:0}} value={current.subfield} readOnly />
               </div>
               <span className="small">{t('selectSubfieldHint')}</span>
             </div>
@@ -282,6 +282,7 @@ export function ProblemEditor() {
                 placeholder={'Others (custom)'}
                 value={current.source}
                 onChange={(e)=> update({ source: e.target.value })}
+                style={{flex:1, minWidth:0}}
               />
             </div>
           </div>
