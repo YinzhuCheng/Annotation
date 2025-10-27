@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
-import JSZip from 'jszip';
 import { getImageBlob } from '../lib/db';
+import JSZip from 'jszip';
 
 const HEADER = [
   'id','Question','Question_type','Options','Answer','Subfield','Source','Image','Image_dependency','Academic_Level','Difficulty'
@@ -14,6 +14,7 @@ export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importedCount, setImportedCount] = useState<number | null>(null);
 
   const exportXlsx = async () => {
     // Build rows; Image column should contain the intended exported filename (<id>.jpg) when present
@@ -79,13 +80,37 @@ export function ImportExport() {
     downloadBlob(outZip, `dataset-${Date.now()}.zip`);
   };
 
-  const importXlsx = async (file: File) => {
+  const exportImages = async () => {
+    const zip = new JSZip();
+    for (const p of problems) {
+      if (!p.image) continue;
+      try {
+        let blob: Blob | undefined;
+        if (p.image.startsWith('images/')) {
+          blob = (await getImageBlob(p.image)) as Blob | undefined;
+        } else {
+          const r = await fetch(p.image);
+          blob = await r.blob();
+        }
+        if (blob) {
+          zip.file(`${p.id}.jpg`, blob);
+        }
+      } catch {
+        // ignore missing blobs
+      }
+    }
+    const out = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(out, `images-${Date.now()}.zip`);
+  };
+
+  const importXlsx = async (file: File): Promise<number> => {
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data);
     const ws = wb.Sheets[wb.SheetNames[0]];
     const arr = XLSX.utils.sheet_to_json<string[]> (ws, { header: 1 });
     const header = (arr[0] as string[]) || [];
     const idx = (name: string) => header.indexOf(name);
+    let count = 0;
     for (let i=1;i<arr.length;i++){
       const row = arr[i] as any[];
       if (!row?.length) continue;
@@ -117,7 +142,9 @@ export function ImportExport() {
       const academicLevel = String(row[idx('Academic_Level')] || 'K12') as any;
       const difficulty = Number(row[idx('Difficulty')] || 1) as any;
       upsertProblem({ id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
+      count++;
     }
+    return count;
   };
 
   // Collect dropped files, supporting folders via webkit entries
@@ -168,20 +195,18 @@ export function ImportExport() {
     e.preventDefault();
     const dropped = await collectDroppedFiles(e.dataTransfer.items);
     const files = dropped.filter(f => f.name.toLowerCase().endsWith('.xlsx'));
-    for (const f of files) await importXlsx(f);
-  };
-
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (folderInputRef.current) {
-      folderInputRef.current.setAttribute('webkitdirectory', '');
-      folderInputRef.current.setAttribute('directory', '');
+    let total = 0;
+    for (const f of files) {
+      total += await importXlsx(f);
     }
-  }, []);
+    if (total > 0) setImportedCount(total);
+  };
+  // Folder selection button removed; dropzone still supports dropping folders.
 
   return (
     <div className="row" style={{gap:8}}>
       <button onClick={exportXlsx}>{t('exportXlsx')}</button>
+      <button onClick={exportImages}>{t('exportImages')}</button>
       <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDrop} style={{padding:'8px 12px'}}>
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
           <input
@@ -189,25 +214,21 @@ export function ImportExport() {
             type="file"
             accept=".xlsx"
             style={{display:'none'}}
-            onChange={(e)=>{
+            onChange={async (e)=>{
               const f = e.target.files?.[0];
-              if (f) importXlsx(f);
-            }}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            accept=".xlsx"
-            multiple
-            style={{display:'none'}}
-            onChange={(e)=>{
-              const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
-              files.forEach(f => importXlsx(f));
+              if (f) {
+                const c = await importXlsx(f);
+                if (c > 0) setImportedCount(c);
+              }
             }}
           />
           <button onClick={()=> fileInputRef.current?.click()}>{t('importXlsx')}</button>
-          <button onClick={()=> folderInputRef.current?.click()}>{t('importXlsxFolder')}</button>
           <span className="small">Drag & drop .xlsx files or folders to import</span>
+          {importedCount !== null && (
+            <span className="small" style={{ marginLeft: 8 }}>
+              {t('importSuccess', { count: importedCount })}
+            </span>
+          )}
         </div>
       </div>
     </div>
