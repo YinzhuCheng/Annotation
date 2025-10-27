@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image Viewer</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #ddd; background: #fff; }
+      main { display: grid; place-items: center; padding: 16px; }
+      img { max-width: min(1400px, 95vw); max-height: calc(100vh - 110px); width: auto; height: auto; display: block; }
+      button { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; background: #f8f8f8; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div id="title">Image Viewer</div>
+      <div>
+        <button id="back"></button>
+      </div>
+    </header>
+    <main>
+      <img id="img" alt="image" />
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const lang = params.get('lang') || 'en';
+      const src = params.get('src') || '';
+      const dict = {
+        en: { title: 'Image Viewer', back: 'Back' },
+        zh: { title: '图片预览', back: '返回' },
+      };
+      const t = dict[lang] || dict.en;
+      document.getElementById('title').textContent = t.title;
+      const backBtn = document.getElementById('back');
+      backBtn.textContent = t.back;
+      backBtn.addEventListener('click', () => { window.close(); history.back(); });
+      const img = document.getElementById('img');
+      if (src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('http') || src.startsWith('/')) {
+        img.src = src;
+      } else {
+        // Fall back to local IndexedDB-backed route is not available here; show as-is
+        img.src = src;
+      }
+    </script>
+  </body>
+</html>

@@ -263,6 +263,9 @@ export function ProblemEditor() {
                 <span className="small">Image_dependency=1</span>
               </div>
               <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
+              <div className="row" style={{marginTop:8, justifyContent:'flex-end'}}>
+                <button onClick={()=> window.open(`/image-viewer.html?lang=${encodeURIComponent(String((t as any).i18n?.language || 'en'))}&src=${encodeURIComponent(confirmedImageUrl)}`, '_blank')}>{t('viewLarge')}</button>
+              </div>
             </div>
           )}
           <div className="label">{t('uploadImage')}</div>
