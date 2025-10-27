@@ -45,20 +45,20 @@ export default function App() {
 
         <div className="grid grid-2">
           <div className="card">
-            {/* ModeSwitch removed; default to agent mode */}
-            <div className="badge" style={{display:'block', marginTop: 12}}>{t('agentBanner')}</div>
+            <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+              <div className="label">{t('settingsBlock')}</div>
+              <div className="badge" style={{marginTop: 12}}>{t('agentBanner')}</div>
+            </div>
             <LLMConfig />
+            <hr className="div" />
+            <ImportExport />
           </div>
 
           <div className="card">
-            <ImportExport />
+            <div className="label">{t('problemsBlock')}</div>
+            <ProblemEditor />
           </div>
         </div>
-
-        <div className="card" style={{marginTop: 16}}>
-          <ProblemEditor />
-        </div>
-
         <div className="card" style={{marginTop: 16}}>
           <ImageComposer />
         </div>
