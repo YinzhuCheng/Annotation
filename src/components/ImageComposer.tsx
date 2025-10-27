@@ -138,6 +138,8 @@ export function ImageComposer() {
       const padding = 24;
       const gap = 16;
       const optionGap = 10;
+      const rowLabelLineHeight = 24; // for "<Image N>" label
+      const colLabelLineHeight = 24; // for per-option (A..E) labels
       let totalHeight = padding; // start padding
 
       // First pass: measure heights
@@ -148,7 +150,8 @@ export function ImageComposer() {
           const url = URL.createObjectURL(file);
           const img = await readImage(url);
           const scale = (targetWidth - padding * 2) / img.width;
-          totalHeight += img.height * scale + gap;
+          // include row label height
+          totalHeight += img.height * scale + rowLabelLineHeight + gap;
           URL.revokeObjectURL(url);
         } else {
           const present = b.files.filter(Boolean);
@@ -160,7 +163,8 @@ export function ImageComposer() {
             const img = await readImage(u);
             const colWidth = (targetWidth - padding * 2 - optionGap * (cols - 1)) / cols;
             const scale = colWidth / img.width;
-            rowHeight = Math.max(rowHeight, img.height * scale + 24); // include label space
+            // include both row label (Image N) and per-column (A..E) label
+            rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
             URL.revokeObjectURL(u);
           }
           totalHeight += rowHeight + gap;
@@ -181,7 +185,9 @@ export function ImageComposer() {
       ctx.fillStyle = '#000000';
       ctx.font = '20px sans-serif';
       let y = padding;
-      const separatorColor = '#e5e7eb';
+      const separatorColor = '#3b82f6'; // blue separators
+      const separatorWidth = 2;
+      let rowIndex = 1; // for <Image N>
 
       for (let bi=0;bi<blocks.length;bi++){
         const b = blocks[bi];
@@ -193,8 +199,13 @@ export function ImageComposer() {
           const drawWidth = targetWidth - padding * 2;
           const scale = drawWidth / img.width;
           const h = img.height * scale;
-          ctx.drawImage(img, padding, y, drawWidth, h);
-          y += h + gap;
+          // Row label: <Image N>
+          ctx.fillStyle = '#000000';
+          ctx.fillText(`<Image ${rowIndex}>`, padding, y + 18);
+          // Draw image below the row label line
+          ctx.drawImage(img, padding, y + rowLabelLineHeight, drawWidth, h);
+          y += h + rowLabelLineHeight + gap;
+          rowIndex += 1;
           URL.revokeObjectURL(url);
         } else {
           const present = b.files.filter(Boolean);
@@ -202,6 +213,9 @@ export function ImageComposer() {
           const cols = present.length;
           const colWidth = (targetWidth - padding * 2 - optionGap * (cols - 1)) / cols;
           let rowH = 0;
+          // Row label: <Image N> for the entire row
+          ctx.fillStyle = '#000000';
+          ctx.fillText(`<Image ${rowIndex}>`, padding, y + 18);
           for (let i=0;i<present.length;i++){
             const file = present[i] as Blob;
             const url = URL.createObjectURL(file);
@@ -209,23 +223,26 @@ export function ImageComposer() {
             const scale = colWidth / img.width;
             const h = img.height * scale;
             const x = padding + i * (colWidth + optionGap);
-            // label (A..E)
+            // label (A..E) placed on a separate line under the row label
             const label = String.fromCharCode(65 + i);
             ctx.fillStyle = '#000000';
-            ctx.fillText(`(${label})`, x, y + 18);
-            ctx.drawImage(img, x, y + 24, colWidth, h);
-            rowH = Math.max(rowH, h + 24);
+            ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + 18);
+            ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, colWidth, h);
+            rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
             URL.revokeObjectURL(url);
           }
           y += rowH + gap;
+          rowIndex += 1;
         }
         // separator line except after last
         if (bi < blocks.length - 1) {
           ctx.strokeStyle = separatorColor;
+          ctx.lineWidth = separatorWidth;
           ctx.beginPath();
           ctx.moveTo(padding, y - gap/2);
           ctx.lineTo(targetWidth - padding, y - gap/2);
           ctx.stroke();
+          ctx.lineWidth = 1; // reset
         }
       }
 
