@@ -9,7 +9,6 @@ const resources = {
       language: '中文/EN',
       manualMode: 'Manual Mode',
       agentMode: 'LLM Agent Mode',
-      agentBanner: 'LLM mode supports automatic text extraction. You can upload a problem image or paste a screenshot; the system will automatically extract the text.',
       llmConfig: 'LLM Configuration',
       settingsBlock: 'Settings',
       problemsBlock: 'Problems',
@@ -23,7 +22,7 @@ const resources = {
       save: 'Save',
       saved: 'Saved',
       problemText: 'Problem Text',
-      uploadImage: '上传图片自动提取文字 (Upload image to auto-extract text)',
+      uploadImage: 'Upload image to auto-extract text',
       ocrExtract: 'Auto recognize text in image',
       confirmText: 'Confirm Text',
       targetType: 'Target Problem Type',
@@ -79,7 +78,14 @@ const resources = {
       llmMissingTitle: 'LLM configuration required',
       llmMissingBody: 'Please enter API Key, Model, and Base URL in the LLM Configuration.',
       openLLMConfig: 'Open LLM Configuration',
-      dismiss: 'Dismiss'
+      dismiss: 'Dismiss',
+      browse: 'Browse',
+      folder: 'Folder',
+      dragDropOrPaste: 'Drag & drop or paste screenshot',
+      dragDropOrChooseImage: 'Drag & drop or choose an image',
+      dragDropMultipleOrPickFolder: 'Drag & drop multiple images (A–E) or pick a folder',
+      viewLarge: 'View large',
+      back: 'Back'
     }
   },
   zh: {
@@ -89,7 +95,6 @@ const resources = {
       language: '中文/EN',
       manualMode: '手动模式',
       agentMode: 'LLM 代理模式',
-      agentBanner: 'LLM 模式支持自动文字提取。你可以上传题目图片或粘贴截图，系统将自动提取文本。',
       llmConfig: 'LLM 配置',
       settingsBlock: '设置',
       problemsBlock: '题目',
@@ -103,7 +108,7 @@ const resources = {
       save: '保存',
       saved: '已保存',
       problemText: '题目文本',
-      uploadImage: '上传图片自动提取文字 (Upload image to auto-extract text)',
+      uploadImage: '上传图片以自动提取文字',
       ocrExtract: '自动识别图中文字',
       confirmText: '确认文本',
       targetType: '目标题型',
@@ -159,7 +164,14 @@ const resources = {
       llmMissingTitle: '需要配置 LLM',
       llmMissingBody: '请在 LLM 配置中填写 API Key、模型与 Base URL。',
       openLLMConfig: '打开 LLM 配置',
-      dismiss: '关闭'
+      dismiss: '关闭',
+      browse: '选择文件',
+      folder: '文件夹',
+      dragDropOrPaste: '拖拽或粘贴截图',
+      dragDropOrChooseImage: '拖拽或选择图片',
+      dragDropMultipleOrPickFolder: '拖拽多张图片（A–E）或选择文件夹',
+      viewLarge: '看大图',
+      back: '返回'
     }
   }
 };
