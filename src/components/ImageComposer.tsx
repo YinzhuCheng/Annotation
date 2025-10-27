@@ -137,9 +137,39 @@ export function ImageComposer() {
       const targetWidth = 1000;
       const padding = 24;
       const gap = 16;
-      const optionGap = 10;
-      const rowLabelLineHeight = 24; // for "<Image N>" label
-      const colLabelLineHeight = 24; // for per-option (A..E) labels
+      const optionGap = 12;
+      // Increased font sizes for better readability
+      const rowLabelFontSize = 28; // for "<Image N>" label
+      const colLabelFontSize = 22; // for per-option (A..E) labels
+      const rowLabelLineHeight = 34;
+      const colLabelLineHeight = 28;
+      const minAreaRatioVsSingle = 0.6; // ensure options are not too small
+      const drawWidthFull = targetWidth - padding * 2;
+
+      // Determine groups for options block: default to A / BC / DE for 5 options
+      const computeOptionGroups = (count: number): number[] => {
+        if (count <= 0) return [];
+        if (count === 1) return [1];
+        if (count === 2) return [2];
+        if (count === 3) return [1, 2];
+        if (count === 4) return [1, 2, 1];
+        return [1, 2, 2]; // 5 or more (we cap at 5 elsewhere)
+      };
+      const enforceMinArea = (groups: number[]): number[] => {
+        const finalGroups: number[] = [];
+        for (const g of groups) {
+          if (g <= 1) { finalGroups.push(1); continue; }
+          const colWidth = (drawWidthFull - optionGap * (g - 1)) / g;
+          const areaRatio = (colWidth / drawWidthFull) ** 2;
+          if (areaRatio >= minAreaRatioVsSingle) {
+            finalGroups.push(g);
+          } else {
+            // Fall back to stacking singles to guarantee size
+            for (let i = 0; i < g; i++) finalGroups.push(1);
+          }
+        }
+        return finalGroups;
+      };
       let totalHeight = padding; // start padding
 
       // First pass: measure heights
@@ -156,18 +186,35 @@ export function ImageComposer() {
         } else {
           const present = b.files.filter(Boolean);
           if (!present.length) continue;
-          const cols = present.length;
-          let rowHeight = 0;
-          for (let i=0;i<present.length;i++){
-            const u = URL.createObjectURL(present[i] as Blob);
-            const img = await readImage(u);
-            const colWidth = (targetWidth - padding * 2 - optionGap * (cols - 1)) / cols;
-            const scale = colWidth / img.width;
-            // include both row label (Image N) and per-column (A..E) label
-            rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
-            URL.revokeObjectURL(u);
+          // Determine grouped layout
+          const baseGroups = computeOptionGroups(present.length);
+          const groups = enforceMinArea(baseGroups);
+
+          let optIdx = 0;
+          for (const g of groups) {
+            let rowHeight = 0;
+            if (g <= 1) {
+              // single option full width
+              const u = URL.createObjectURL(present[optIdx] as Blob);
+              const img = await readImage(u);
+              const scale = drawWidthFull / img.width;
+              rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
+              URL.revokeObjectURL(u);
+              optIdx += 1;
+            } else {
+              // multiple options in one row
+              const colWidth = (drawWidthFull - optionGap * (g - 1)) / g;
+              for (let i = 0; i < g; i++) {
+                const u = URL.createObjectURL(present[optIdx + i] as Blob);
+                const img = await readImage(u);
+                const scale = colWidth / img.width;
+                rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
+                URL.revokeObjectURL(u);
+              }
+              optIdx += g;
+            }
+            totalHeight += rowHeight + gap;
           }
-          totalHeight += rowHeight + gap;
         }
       }
       totalHeight += padding; // bottom padding
@@ -183,7 +230,7 @@ export function ImageComposer() {
 
       // draw
       ctx.fillStyle = '#000000';
-      ctx.font = '20px sans-serif';
+      ctx.font = `${rowLabelFontSize}px sans-serif`;
       let y = padding;
       const separatorColor = '#3b82f6'; // blue separators
       const separatorWidth = 2;
@@ -201,7 +248,8 @@ export function ImageComposer() {
           const h = img.height * scale;
           // Row label: <Image N>
           ctx.fillStyle = '#000000';
-          ctx.fillText(`<Image ${rowIndex}>`, padding, y + 18);
+          ctx.font = `${rowLabelFontSize}px sans-serif`;
+          ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
           // Draw image below the row label line
           ctx.drawImage(img, padding, y + rowLabelLineHeight, drawWidth, h);
           y += h + rowLabelLineHeight + gap;
@@ -210,29 +258,59 @@ export function ImageComposer() {
         } else {
           const present = b.files.filter(Boolean);
           if (!present.length) continue;
-          const cols = present.length;
-          const colWidth = (targetWidth - padding * 2 - optionGap * (cols - 1)) / cols;
-          let rowH = 0;
-          // Row label: <Image N> for the entire row
-          ctx.fillStyle = '#000000';
-          ctx.fillText(`<Image ${rowIndex}>`, padding, y + 18);
-          for (let i=0;i<present.length;i++){
-            const file = present[i] as Blob;
-            const url = URL.createObjectURL(file);
-            const img = await readImage(url);
-            const scale = colWidth / img.width;
-            const h = img.height * scale;
-            const x = padding + i * (colWidth + optionGap);
-            // label (A..E) placed on a separate line under the row label
-            const label = String.fromCharCode(65 + i);
+          const baseGroups = computeOptionGroups(present.length);
+          const groups = enforceMinArea(baseGroups);
+
+          let optIdx = 0;
+          for (const g of groups) {
+            const drawWidth = targetWidth - padding * 2;
+            let rowH = 0;
+            // Row label per row group
             ctx.fillStyle = '#000000';
-            ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + 18);
-            ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, colWidth, h);
-            rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
-            URL.revokeObjectURL(url);
+            ctx.font = `${rowLabelFontSize}px sans-serif`;
+            ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+
+            if (g <= 1) {
+              const file = present[optIdx] as Blob;
+              const url = URL.createObjectURL(file);
+              const img = await readImage(url);
+              const scale = drawWidth / img.width;
+              const h = img.height * scale;
+              const x = padding;
+              // label (A..E) under the row label
+              const label = String.fromCharCode(65 + optIdx);
+              ctx.fillStyle = '#000000';
+              ctx.font = `${colLabelFontSize}px sans-serif`;
+              ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
+              ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, drawWidth, h);
+              rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
+              URL.revokeObjectURL(url);
+              optIdx += 1;
+            } else {
+              const colWidth = (drawWidth - optionGap * (g - 1)) / g;
+              for (let i = 0; i < g; i++) {
+                const file = present[optIdx + i] as Blob;
+                const url = URL.createObjectURL(file);
+                const img = await readImage(url);
+                const scale = colWidth / img.width;
+                const h = img.height * scale;
+                const x = padding + i * (colWidth + optionGap);
+                const label = String.fromCharCode(65 + optIdx + i);
+                ctx.fillStyle = '#000000';
+                ctx.font = `${colLabelFontSize}px sans-serif`;
+                ctx.fillText(`(${label})`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
+                ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, colWidth, h);
+                rowH = Math.max(rowH, h + rowLabelLineHeight + colLabelLineHeight);
+                URL.revokeObjectURL(url);
+              }
+              optIdx += g;
+            }
+
+            y += rowH + gap;
+            rowIndex += 1;
+
+            // separator line except after last group within block is handled below via bi check
           }
-          y += rowH + gap;
-          rowIndex += 1;
         }
         // separator line except after last
         if (bi < blocks.length - 1) {
