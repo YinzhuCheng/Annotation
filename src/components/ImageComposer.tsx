@@ -29,6 +29,7 @@ export function ImageComposer() {
     return [];
   });
   const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [composedPath, setComposedPath] = useState<string>('');
   const [isComposing, setIsComposing] = useState(false);
 
   useEffect(() => {
@@ -230,7 +231,7 @@ export function ImageComposer() {
 
       const blob = await new Promise<Blob>((resolve) => canvas.toBlob(b => resolve(b || new Blob()), 'image/jpeg', 0.92));
       const path = await saveImageBlob(blob);
-      update({ id: problem.id, image: path });
+      setComposedPath(path);
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
     } finally {
@@ -330,7 +331,7 @@ export function ImageComposer() {
           <img className="preview" src={previewUrl} />
           <div className="row" style={{gap:8, marginTop:8}}>
             <button onClick={()=> setPreviewUrl('')}>{t('regenerate')}</button>
-            <button className="primary" onClick={()=> {/* already saved in compose */}}>{t('confirmImage')}</button>
+            <button className="primary" disabled={!composedPath} onClick={()=> { update({ id: problem.id, image: composedPath }); }}>{t('confirmImage')}</button>
           </div>
         </div>
       )}
