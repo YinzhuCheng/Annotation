@@ -19,12 +19,12 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
         return (
           <div className="modal" role="dialog" aria-modal="true" tabIndex={-1}>
             <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
-              <h3 style={{margin:0}}>Help</h3>
+              <h3 style={{margin:0}}>{t('helpTitle') || 'Help'}</h3>
               <button onClick={onClose}>✕</button>
             </div>
             <hr className="div" />
             <div>
-              <p style={{margin:0}}>Help content failed to render. Please close this dialog.</p>
+              <p style={{margin:0}}>{t('helpError') || 'Help content failed to render. Please close this dialog.'}</p>
             </div>
           </div>
         );

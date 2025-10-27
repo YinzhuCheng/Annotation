@@ -9,7 +9,7 @@ export function ModeSwitch() {
 
   return (
     <div>
-      <div className="label">Mode</div>
+      <div className="label">{t('mode')}</div>
       <div className="row">
         <button
           className={mode === 'manual' ? 'primary' : ''}

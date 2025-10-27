@@ -38,7 +38,7 @@ export default function App() {
                 <span className="badge">{t('quota')}: {(storageInfo.quota / (1024*1024)).toFixed(0)} MB</span>
               </>
             ) : (
-              <span className="badge">N/A</span>
+              <span className="badge">{t('notAvailable')}</span>
             )}
           </div>
         </div>

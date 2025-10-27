@@ -6,10 +6,12 @@ const resources = {
     translation: {
       title: 'Dataset Annotation Program',
       help: 'Help',
+      localFirst: 'Local-First',
       language: '中文/EN',
       manualMode: 'Manual Mode',
       agentMode: 'LLM Agent Mode',
       llmConfig: 'LLM Configuration',
+      mode: 'Mode',
       settingsBlock: 'Settings',
       problemsBlock: 'Problems',
       apiKey: 'API Key',
@@ -50,6 +52,7 @@ const resources = {
       preview: 'Preview',
       regenerate: 'Regenerate',
       confirmImage: 'Confirm Image',
+      imageAttached: 'Image attached',
       exportXlsx: 'Export XLSX',
       exportDatasets: 'Export Datasets',
       exportImages: 'Export Images',
@@ -63,10 +66,13 @@ const resources = {
       storage: 'Storage',
       usage: 'Usage',
       quota: 'Quota',
+      notAvailable: 'N/A',
       clearCache: 'Clear Cache',
+      resultLabel: 'Result',
       prev: 'Previous',
       next: 'Next',
       helpTitle: 'Program Overview',
+      helpError: 'Help content failed to render. Please close this dialog.',
       newProblem: 'New Problem',
       saveProblem: 'Save Problem',
       selectSubfieldHint: 'Select multiple subfields; they will be joined with semicolons.',
@@ -86,16 +92,19 @@ const resources = {
       dragDropMultipleOrPickFolder: 'Drag & drop multiple images (A–E) or pick a folder',
       viewLarge: 'View large',
       back: 'Back'
+      , zoomHint: 'Ctrl + Wheel to zoom • Drag to pan • Double-click to reset'
     }
   },
   zh: {
     translation: {
       title: '数据集标注程序',
       help: '帮助',
+      localFirst: '本地优先',
       language: '中文/EN',
       manualMode: '手动模式',
       agentMode: 'LLM 代理模式',
       llmConfig: 'LLM 配置',
+      mode: '模式',
       settingsBlock: '设置',
       problemsBlock: '题目',
       apiKey: 'API Key（仅保存在本地）',
@@ -136,6 +145,7 @@ const resources = {
       preview: '预览',
       regenerate: '重新生成',
       confirmImage: '确认图片',
+      imageAttached: '已添加图片',
       exportXlsx: '导出 XLSX',
       exportDatasets: '导出数据集',
       exportImages: '导出图片',
@@ -149,10 +159,13 @@ const resources = {
       storage: '存储',
       usage: '已用',
       quota: '配额',
+      notAvailable: '不可用',
       clearCache: '清理缓存',
+      resultLabel: '结果',
       prev: '上一题',
       next: '下一题',
       helpTitle: '功能概览',
+      helpError: '帮助内容渲染失败，请关闭此对话框。',
       newProblem: '新建题目',
       saveProblem: '保存题目',
       selectSubfieldHint: '可多次选择多个分支领域，最终以分号拼接。',
@@ -171,7 +184,8 @@ const resources = {
       dragDropOrChooseImage: '拖拽或选择图片',
       dragDropMultipleOrPickFolder: '拖拽多张图片（A–E）或选择文件夹',
       viewLarge: '看大图',
-      back: '返回'
+      back: '返回',
+      zoomHint: '按住 Ctrl 滚轮缩放 • 拖拽平移 • 双击重置'
     }
   }
 };
