@@ -15,8 +15,8 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 hr.div { border:0; height:1px; background: var(--border); margin: 16px 0; }
 textarea { width:100%; min-height:120px; resize: vertical; }
 .small { font-size: 12px; color: var(--muted); }
-.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; }
-.modal { max-width: 800px; width: 92vw; max-height: 86vh; overflow:auto; padding: 16px; border-radius: 12px; background: #0f1218; border:1px solid var(--border); color: var(--fg, #eaecee); }
+.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:2147483647; }
+.modal { max-width: 800px; width: 92vw; max-height: 86vh; overflow:auto; padding: 16px; border-radius: 12px; background: #111827; border:1px solid var(--border); color: #f9fafb; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .list { list-style:none; padding-left: 16px; }
 .list li { margin: 8px 0; }
 .dropzone { padding: 24px; border: 1px dashed var(--border); text-align:center; border-radius: 12px; }

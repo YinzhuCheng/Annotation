@@ -72,7 +72,7 @@ export default function App() {
         </div>
       </div>
 
-      {showHelp && <HelpModal onClose={() => { if (window.location.hash === '#help') { history.back(); } else { setShowHelp(false); } }} />}
+      {showHelp && <HelpModal onClose={() => { if (window.location.hash === '#help') { window.location.hash = ''; } setShowHelp(false); }} />}
     </>
   );
 }
