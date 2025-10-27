@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord } from '../state/store';
 import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
-import { getImageBlob } from '../lib/db';
 import { generateProblemFromText } from '../lib/generator';
 
 const SUBFIELDS = [
@@ -46,7 +45,10 @@ export function ProblemEditor() {
     }
   };
   const [ocrText, setOcrText] = useState('');
+  const [ocrImage, setOcrImage] = useState<Blob | null>(null);
+  const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,43 +64,36 @@ export function ProblemEditor() {
     return () => clearTimeout(timer);
   }, [savedAt]);
 
-  const onAddImage = async (file: File) => {
-    // For MVP we just create a local object URL and remember it in image field
+  const onAddOcrImage = async (file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    setOcrImage(file);
     const url = URL.createObjectURL(file);
-    update({ image: url });
+    if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+    setOcrPreviewUrl(url);
   };
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
-    if (file) await onAddImage(file);
+    if (file) await onAddOcrImage(file);
   };
 
   const onPaste = async (e: React.ClipboardEvent) => {
     const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
     if (item) {
       const file = item.getAsFile();
-      if (file) await onAddImage(file);
+      if (file) await onAddOcrImage(file);
     }
   };
 
   const runOCR = async () => {
-    if (!current?.image) return;
-    if (!ensureLLM()) return;
-    let blob: Blob | undefined;
-    try {
-      if (current.image.startsWith('images/')) {
-        blob = await getImageBlob(current.image) as Blob | undefined;
-      } else {
-        const r = await fetch(current.image);
-        blob = await r.blob();
-      }
-    } catch {}
-    if (!blob) {
-      alert('Image not available for OCR.');
+    if (!ocrImage) {
+      alert('Please upload an image for OCR (not the problem image).');
       return;
     }
-    const text = await ocrWithLLM(blob, llm);
+    if (!ensureLLM()) return;
+    const text = await ocrWithLLM(ocrImage, llm);
     setOcrText(text);
   };
 
@@ -244,15 +239,21 @@ export function ProblemEditor() {
             <div className="row" style={{justifyContent:'center', gap:8}}>
               <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
                 const f = e.target.files?.[0];
-                if (f) onAddImage(f);
+                if (f) onAddOcrImage(f);
               }} />
+              <input type="file" style={{display:'none'}} ref={folderInputRef} multiple onChange={(e)=>{
+                const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+                if (files[0]) onAddOcrImage(files[0]);
+              }} />
+              {folderInputRef.current && (()=>{ folderInputRef.current.setAttribute('webkitdirectory',''); folderInputRef.current.setAttribute('directory',''); })()}
               <button onClick={()=> fileInputRef.current?.click()}>Browse</button>
+              <button onClick={()=> folderInputRef.current?.click()}>Folder</button>
               <span className="small">Drag & drop or paste screenshot</span>
             </div>
           </div>
-          {current.image && (
+          {ocrPreviewUrl && (
             <div style={{marginTop:8}}>
-              <img className="preview" src={current.image} />
+              <img className="preview" src={ocrPreviewUrl} />
             </div>
           )}
 

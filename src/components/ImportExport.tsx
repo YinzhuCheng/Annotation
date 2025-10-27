@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
+import JSZip from 'jszip';
+import { getImageBlob } from '../lib/db';
 
 const HEADER = [
   'id','Question','Question_type','Options','Answer','Subfield','Source','Image','Image_dependency','Academic_Level','Difficulty'
@@ -12,7 +14,8 @@ export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem } = useAppStore();
 
-  const exportXlsx = () => {
+  const exportXlsx = async () => {
+    // Build rows; Image column should contain the intended exported filename (<id>.jpg) when present
     const rows = problems.map(p => ([
       p.id,
       p.question,
@@ -22,7 +25,6 @@ export function ImportExport() {
           const label = String.fromCharCode(65 + i);
           const trimmed = String(opt || '').trim();
           if (!trimmed) return '';
-          // Ensure prefix like "A: ", "B: "
           const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
           return hasPrefix ? trimmed : `${label}: ${trimmed}`;
         })
@@ -30,7 +32,7 @@ export function ImportExport() {
       p.answer,
       p.subfield,
       p.source,
-      p.image || '',
+      p.image ? `${p.id}.jpg` : '',
       p.image ? 1 : 0,
       p.academicLevel,
       p.difficulty,
@@ -38,8 +40,42 @@ export function ImportExport() {
     const ws = XLSX.utils.aoa_to_sheet([HEADER, ...rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    downloadBlob(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `dataset-${Date.now()}.xlsx`);
+    // Add hyperlink for Image column pointing to images/<id>.jpg
+    const imageColIndex = HEADER.indexOf('Image'); // 0-based
+    for (let i = 0; i < problems.length; i++) {
+      const p = problems[i];
+      if (!p.image) continue;
+      const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex }); // +1 for header row
+      const v = `${p.id}.jpg`;
+      (ws as any)[cellAddr] = { t: 's', v, l: { Target: `images/${v}`, Tooltip: v } };
+    }
+    const xlsxArrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+    // Package XLSX and images together into a single zip
+    const zip = new JSZip();
+    zip.file('dataset.xlsx', xlsxArrayBuffer as ArrayBuffer);
+
+    // Add images as images/<id>.jpg when available
+    for (const p of problems) {
+      if (!p.image) continue;
+      try {
+        let blob: Blob | undefined;
+        if (p.image.startsWith('images/')) {
+          blob = await getImageBlob(p.image) as Blob | undefined;
+        } else {
+          const r = await fetch(p.image);
+          blob = await r.blob();
+        }
+        if (blob) {
+          zip.file(`images/${p.id}.jpg`, blob);
+        }
+      } catch {
+        // ignore missing blobs
+      }
+    }
+
+    const outZip = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(outZip, `dataset-${Date.now()}.zip`);
   };
 
   const importXlsx = async (file: File) => {
@@ -83,9 +119,54 @@ export function ImportExport() {
     }
   };
 
+  // Collect dropped files, supporting folders via webkit entries
+  const collectDroppedFiles = async (items: DataTransferItemList): Promise<File[]> => {
+    const filePromises: Promise<File[]>[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const entry = (item as any).webkitGetAsEntry?.();
+      if (entry) {
+        filePromises.push(traverseEntry(entry));
+      } else {
+        const file = item.getAsFile();
+        if (file) filePromises.push(Promise.resolve([file]));
+      }
+    }
+    const nested = await Promise.all(filePromises);
+    return nested.flat();
+  };
+
+  const traverseEntry = async (entry: any): Promise<File[]> => {
+    if (!entry) return [];
+    if (entry.isFile) {
+      return new Promise<File[]>((resolve) => {
+        entry.file((file: File) => resolve([file]));
+      });
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      return new Promise<File[]>((resolve) => {
+        const all: File[] = [];
+        const readBatch = () => {
+          reader.readEntries(async (entries: any[]) => {
+            if (!entries.length) return resolve(all);
+            for (const e of entries) {
+              const files = await traverseEntry(e);
+              all.push(...files);
+            }
+            readBatch();
+          });
+        };
+        readBatch();
+      });
+    }
+    return [];
+  };
+
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.xlsx'));
+    const dropped = await collectDroppedFiles(e.dataTransfer.items);
+    const files = dropped.filter(f => f.name.toLowerCase().endsWith('.xlsx'));
     for (const f of files) await importXlsx(f);
   };
 
@@ -100,23 +181,25 @@ export function ImportExport() {
   return (
     <div className="row" style={{gap:8}}>
       <button onClick={exportXlsx}>{t('exportXlsx')}</button>
-      <label className="row" style={{gap:8, alignItems:'center'}}>
-        <input type="file" accept=".xlsx" style={{display:'none'}} onChange={(e)=> {
-          const f = e.target.files?.[0];
-          if (f) importXlsx(f);
-        }} />
-        <button>{t('importXlsx')}</button>
-      </label>
       <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDrop} style={{padding:'8px 12px'}}>
-        <span className="small">Drag & drop .xlsx files to import</span>
+        <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
+          <label className="row" style={{gap:8, alignItems:'center'}}>
+            <input type="file" accept=".xlsx" style={{display:'none'}} onChange={(e)=> {
+              const f = e.target.files?.[0];
+              if (f) importXlsx(f);
+            }} />
+            <button>{t('importXlsx')}</button>
+          </label>
+          <label className="row" style={{gap:8, alignItems:'center'}}>
+            <input ref={folderInputRef} type="file" accept=".xlsx" style={{display:'none'}} multiple onChange={(e)=>{
+              const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
+              files.forEach(f => importXlsx(f));
+            }} />
+            <button>{t('importXlsxFolder')}</button>
+          </label>
+        </div>
+        <span className="small">Drag & drop .xlsx files or folders to import</span>
       </div>
-      <label className="row" style={{gap:8, alignItems:'center'}}>
-        <input ref={folderInputRef} type="file" accept=".xlsx" style={{display:'none'}} multiple onChange={(e)=>{
-          const files = Array.from(e.target.files || []).filter(f => f.name.endsWith('.xlsx'));
-          files.forEach(f => importXlsx(f));
-        }} />
-        <button>{t('importXlsxFolder')}</button>
-      </label>
     </div>
   );
 }

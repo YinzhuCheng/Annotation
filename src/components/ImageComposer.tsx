@@ -55,17 +55,79 @@ export function ImageComposer() {
 
   const onDropToOptions = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-    if (!files.length) return;
-    setBlocks(prev => prev.map(b => {
-      if (b.id !== blockId) return b;
-      const next = [...b.files];
-      for (const f of files) {
-        if (next.length >= 5) break;
-        next.push(f);
+    collectDroppedFiles(e.dataTransfer.items).then((all) => {
+      const files = all.filter(f => f.type.startsWith('image/'));
+      if (!files.length) return;
+      files.sort((a, b) => a.name.localeCompare(b.name));
+      setBlocks(prev => prev.map(b => {
+        if (b.id !== blockId) return b;
+        const next = [...b.files];
+        for (const f of files) {
+          if (next.length >= 5) break;
+          next.push(f);
+        }
+        return { ...b, files: next } as Block;
+      }));
+    });
+  };
+
+  const onDropToSingle = (e: React.DragEvent, blockId: string) => {
+    e.preventDefault();
+    collectDroppedFiles(e.dataTransfer.items).then((all) => {
+      const files = all.filter(f => f.type.startsWith('image/'));
+      if (!files.length) return;
+      files.sort((a, b) => a.name.localeCompare(b.name));
+      setBlocks(prev => prev.map(b => {
+        if (b.id !== blockId) return b;
+        const next = [...b.files];
+        next[0] = files[0];
+        return { ...b, files: next } as Block;
+      }));
+    });
+  };
+
+  // Utilities to collect dropped files including directories
+  const collectDroppedFiles = async (items: DataTransferItemList): Promise<File[]> => {
+    const filePromises: Promise<File[]>[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const entry = (item as any).webkitGetAsEntry?.();
+      if (entry) {
+        filePromises.push(traverseEntry(entry));
+      } else {
+        const file = item.getAsFile();
+        if (file) filePromises.push(Promise.resolve([file]));
       }
-      return { ...b, files: next } as Block;
-    }));
+    }
+    const nested = await Promise.all(filePromises);
+    return nested.flat();
+  };
+
+  const traverseEntry = async (entry: any): Promise<File[]> => {
+    if (!entry) return [];
+    if (entry.isFile) {
+      return new Promise<File[]>((resolve) => {
+        entry.file((file: File) => resolve([file]));
+      });
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      return new Promise<File[]>((resolve) => {
+        const all: File[] = [];
+        const readBatch = () => {
+          reader.readEntries(async (entries: any[]) => {
+            if (!entries.length) return resolve(all);
+            for (const e of entries) {
+              const files = await traverseEntry(e);
+              all.push(...files);
+            }
+            readBatch();
+          });
+        };
+        readBatch();
+      });
+    }
+    return [];
   };
 
   const compose = async () => {
@@ -193,11 +255,28 @@ export function ImageComposer() {
               <button onClick={() => removeBlock(b.id)}>✕</button>
             </div>
             {b.type === 'single' ? (
-              <div className="row" style={{gap:8}}>
-                <input type="file" accept="image/*" onChange={(e)=>{
-                  const f = e.target.files?.[0];
-                  if (f) setFile(b.id, 0, f);
-                }} />
+              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>
+                <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
+                  <input type="file" accept="image/*" onChange={(e)=>{
+                    const f = e.target.files?.[0];
+                    if (f) setFile(b.id, 0, f);
+                  }} />
+                  {(() => {
+                    let dirEl: HTMLInputElement | null = null;
+                    return (
+                      <>
+                        <input type="file" style={{display:'none'}} multiple ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }} onChange={(e)=>{
+                          const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+                          files.sort((a, b) => a.name.localeCompare(b.name));
+                          const f = files[0];
+                          if (f) setFile(b.id, 0, f);
+                        }} />
+                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                      </>
+                    );
+                  })()}
+                  <span className="small">Drag & drop or choose an image</span>
+                </div>
               </div>
             ) : (
               <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToOptions(e, b.id)}>
@@ -211,6 +290,31 @@ export function ImageComposer() {
                       }} />
                     </div>
                   ))}
+                </div>
+                <div className="row" style={{justifyContent:'center', marginTop:8}}>
+                  {(() => {
+                    let dirEl: HTMLInputElement | null = null;
+                    const onDirChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+                      const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+                      files.sort((a, b) => a.name.localeCompare(b.name));
+                      setBlocks(prev => prev.map(bb => {
+                        if (bb.id !== b.id) return bb;
+                        const next: (File | Blob)[] = [];
+                        for (const f of files) {
+                          if (next.length >= 5) break;
+                          next.push(f);
+                        }
+                        return { ...bb, files: next } as Block;
+                      }));
+                    };
+                    return (
+                      <>
+                        <input type="file" style={{display:'none'}} multiple ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }} onChange={onDirChange} />
+                        <button onClick={()=> dirEl?.click()}>Folder</button>
+                      </>
+                    );
+                  })()}
+                  <span className="small">Drag & drop multiple images (A–E) or pick a folder</span>
                 </div>
               </div>
             )}
