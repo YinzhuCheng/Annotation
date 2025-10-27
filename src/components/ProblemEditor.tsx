@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord } from '../state/store';
 import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
 import { getImageBlob } from '../lib/db';
+import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText } from '../lib/generator';
 
 const SUBFIELDS = [
@@ -124,30 +125,7 @@ export function ProblemEditor() {
     update({ question: ocrText });
   };
 
-  const openViewerWindow = (src: string) => {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    const backText = t('back');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Image</title><style>
-      body { margin:0; background:#0b0c10; color:#eaecee; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial; }
-      header { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid #2b2f36; position:sticky; top:0; background:#0b0c10; }
-      a.btn { display:inline-block; padding:6px 10px; background:#3b82f6; color:#fff; text-decoration:none; border-radius:8px; }
-      .ghost { background: transparent; color:#eaecee; border:1px solid #2b2f36; }
-      main { display:flex; justify-content:center; padding:12px; }
-      img { max-width: min(96vw, 1600px); max-height: 90vh; object-fit: contain; border-radius: 8px; border:1px solid #2b2f36; }
-    </style></head><body>
-    <header>
-      <a class="btn ghost" href="#" id="backBtn">← ${backText}</a>
-    </header>
-    <main>
-      <img src="${src}" />
-    </main>
-    <script>
-      document.getElementById('backBtn').addEventListener('click', function(e){ e.preventDefault(); if (history.length > 1) { history.back(); } else { window.close(); } });
-    </script>
-    </body></html>`);
-    w.document.close();
-  };
+  const openViewer = (src: string) => openViewerWindow(src, { title: t('viewLarge'), back: t('back') });
 
   const ensureLLM = (): boolean => {
     if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
@@ -245,9 +223,9 @@ export function ProblemEditor() {
 
           <div className="label" style={{marginTop:12}}>{t('targetType')}</div>
           <select value={current.questionType} onChange={(e)=> update({ questionType: e.target.value as any })}>
-            <option>Multiple Choice</option>
-            <option>Fill-in-the-blank</option>
-            <option>Proof</option>
+            <option value="Multiple Choice">{t('type_mc')}</option>
+            <option value="Fill-in-the-blank">{t('type_fitb')}</option>
+            <option value="Proof">{t('type_proof')}</option>
           </select>
           <div className="small" style={{marginTop:6}}>{t('type_hint')}</div>
 
@@ -285,10 +263,10 @@ export function ProblemEditor() {
             <div className="card" style={{marginBottom:12}}>
               <div className="row" style={{gap:8, alignItems:'center', justifyContent:'space-between'}}>
                 <div className="row" style={{gap:8}}>
-                  <span className="badge">Image attached</span>
+                  <span className="badge">{t('imageAttached')}</span>
                   <span className="small">Image_dependency=1</span>
                 </div>
-                <button onClick={()=> openViewerWindow(confirmedImageUrl)}>{t('viewLarge')}</button>
+                <button onClick={()=> openViewer(confirmedImageUrl)}>{t('viewLarge')}</button>
               </div>
               <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
             </div>
@@ -313,7 +291,7 @@ export function ProblemEditor() {
           {ocrPreviewUrl && (
             <div style={{marginTop:8}}>
               <div className="row" style={{justifyContent:'flex-end', marginBottom:6}}>
-                <button onClick={()=> openViewerWindow(ocrPreviewUrl)}>{t('viewLarge')}</button>
+                <button onClick={()=> openViewer(ocrPreviewUrl)}>{t('viewLarge')}</button>
               </div>
               <img className="preview" src={ocrPreviewUrl} />
             </div>
@@ -352,7 +330,7 @@ export function ProblemEditor() {
               )}
               {/* Display the final joined result */}
               <div className="row" style={{gap:8, width:'100%'}}>
-                <span className="small">Result:</span>
+                <span className="small">{t('resultLabel')}:</span>
                 <input style={{flex:1, minWidth:0}} value={current.subfield} readOnly />
               </div>
               <span className="small">{t('selectSubfieldHint')}</span>
@@ -378,7 +356,7 @@ export function ProblemEditor() {
               </select>
               <input
                 ref={customSourceInputRef}
-                placeholder={'Others (custom)'}
+                placeholder={t('subfield_others')}
                 value={current.source}
                 onChange={(e)=> update({ source: e.target.value })}
                 style={{flex:1, minWidth:0}}

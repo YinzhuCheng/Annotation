@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { saveImageBlob } from '../lib/db';
+import { openViewerWindow } from '../lib/viewer';
 
 type Block =
   | { id: string; type: 'single'; files: (File | Blob)[] }
@@ -431,7 +432,7 @@ export function ImageComposer() {
             <span className="badge">{t('preview')}</span>
           </div>
           <div className="row" style={{justifyContent:'flex-end', margin:'6px 0'}}>
-            <button onClick={()=> window.open(previewUrl, '_blank')}>{t('viewLarge')}</button>
+            <button onClick={()=> openViewerWindow(previewUrl, { title: t('viewLarge'), back: t('back') })}>{t('viewLarge')}</button>
           </div>
           <img className="preview" src={previewUrl} />
           <div className="row" style={{gap:8, marginTop:8}}>

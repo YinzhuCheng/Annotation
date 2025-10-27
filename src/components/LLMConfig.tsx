@@ -9,7 +9,8 @@ export function LLMConfig() {
   const setLLM = useAppStore((s) => s.setLLM);
   const mode = useAppStore((s) => s.mode);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [testMsg, setTestMsg] = useState('Hello');
+  const { t: tr } = useTranslation();
+  const [testMsg, setTestMsg] = useState('');
   const [reply, setReply] = useState<string>('');
   const [err, setErr] = useState<string>('');
 
