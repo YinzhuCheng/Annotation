@@ -22,6 +22,7 @@ export function ProblemEditor() {
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
   const [ocrText, setOcrText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const customSubfieldInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!current) return;
@@ -110,6 +111,38 @@ export function ProblemEditor() {
 
   useEffect(() => { ensureOptionsForMC(); }, [current.questionType]);
 
+  // ----- Subfield helpers -----
+  const selectedSubfields = useMemo(() => (current.subfield ? current.subfield.split(';').filter(Boolean) : []), [current.subfield]);
+  const [showCustomSubfield, setShowCustomSubfield] = useState(false);
+  const [customSubfield, setCustomSubfield] = useState('');
+
+  const addSubfield = (value: string) => {
+    const v = value.trim();
+    if (!v) return;
+    const set = new Set(selectedSubfields);
+    set.add(v);
+    update({ subfield: Array.from(set).join(';') });
+  };
+  const removeSubfield = (value: string) => {
+    const next = selectedSubfields.filter(s => s !== value);
+    update({ subfield: next.join(';') });
+  };
+  const onSelectSubfield = (v: string) => {
+    if (!v) return;
+    if (v === 'Others') {
+      setShowCustomSubfield(true);
+      setTimeout(() => customSubfieldInputRef.current?.focus(), 0);
+      return;
+    }
+    addSubfield(v);
+  };
+  const confirmCustomSubfield = () => {
+    if (!customSubfield.trim()) return;
+    addSubfield(customSubfield);
+    setCustomSubfield('');
+    setShowCustomSubfield(false);
+  };
+
   return (
     <div>
       <div className="row" style={{justifyContent:'space-between'}}>
@@ -197,26 +230,26 @@ export function ProblemEditor() {
           <div style={{marginTop:12}}>
             <div className="label">{t('subfield')}</div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-              <select onChange={(e)=>{
-                const v = e.target.value;
-                const parts = (current.subfield? current.subfield.split(';'): []).filter(Boolean);
-                parts.push(v);
-                update({ subfield: Array.from(new Set(parts)).join(';') });
-              }} value="">
+              <select onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }} defaultValue="">
                 <option value="" disabled>—</option>
                 {SUBFIELDS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <input placeholder={t('subfield_others')} onKeyDown={(e)=>{
-                if (e.key === 'Enter') {
-                  const v = (e.target as HTMLInputElement).value.trim();
-                  if (v) {
-                    const parts = (current.subfield? current.subfield.split(';'): []).filter(Boolean);
-                    parts.push(v);
-                    update({ subfield: Array.from(new Set(parts)).join(';') });
-                    (e.target as HTMLInputElement).value='';
-                  }
-                }
-              }} />
+              {showCustomSubfield && (
+                <div className="row" style={{gap:8}}>
+                  <input ref={customSubfieldInputRef} value={customSubfield} placeholder={t('subfield_others')} onChange={(e)=> setCustomSubfield(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') confirmCustomSubfield(); }} />
+                  <button onClick={confirmCustomSubfield}>{t('confirmText')}</button>
+                </div>
+              )}
+              {selectedSubfields.length > 0 && (
+                <div className="row" style={{gap:6, flexWrap:'wrap'}}>
+                  {selectedSubfields.map(s => (
+                    <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
+                      {s}
+                      <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <span className="small">{t('selectSubfieldHint')}</span>
             </div>
           </div>
