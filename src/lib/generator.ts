@@ -37,7 +37,7 @@ No markdown, no prose.`;
   const partial: Partial<ProblemRecord> = {
     question: String(obj.question || '').trim() || input,
     questionType: (obj.questionType as any) || targetType,
-    options: Array.isArray(obj.options) && obj.options.length === 5 ? obj.options.map(String) : targetType === 'Multiple Choice' ? ['A','B','C','D','E'] : [],
+    options: Array.isArray(obj.options) && obj.options.length === 5 ? obj.options.map(String) : targetType === 'Multiple Choice' ? ['', '', '', '', ''] : [],
     answer: typeof obj.answer === 'string' || Array.isArray(obj.answer) ? (typeof obj.answer === 'string' ? obj.answer : JSON.stringify(obj.answer)) : '',
     subfield: typeof obj.subfield === 'string' ? obj.subfield : 'Others',
     academicLevel: obj.academicLevel === 'Professional' ? 'Professional' : 'K12',

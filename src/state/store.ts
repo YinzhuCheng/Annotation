@@ -47,7 +47,7 @@ const emptyProblem = (): ProblemRecord => ({
   id: `${Date.now()}`,
   question: '',
   questionType: 'Multiple Choice',
-  options: ['A','B','C','D','E'],
+  options: ['', '', '', '', ''],
   answer: '',
   subfield: '',
   source: '',
