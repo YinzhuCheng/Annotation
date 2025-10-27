@@ -179,7 +179,7 @@ export function ProblemEditor() {
           {current.questionType === 'Multiple Choice' && (
             <div style={{marginTop:12}}>
               <div className="label">{t('options')}</div>
-              <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr', gap: 8}}>
+              <div className="options-grid">
                 {['A','B','C','D','E'].map((k, idx) => (
                   <input key={k} value={current.options[idx] || ''} onChange={(e)=>{
                     const next = [...(current.options||[])];
@@ -227,7 +227,7 @@ export function ProblemEditor() {
             <textarea style={{marginTop:8}} value={ocrText} onChange={(e)=> setOcrText(e.target.value)} />
           )}
 
-          <div style={{marginTop:12}}>
+          <div className="card" style={{marginTop:12}}>
             <div className="label">{t('subfield')}</div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
               <select onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }} defaultValue="">
