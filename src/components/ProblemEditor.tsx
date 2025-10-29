@@ -16,9 +16,10 @@ const SOURCES = [
   'MATH-Vision Dataset','Original Question','Math Kangaroo Contest','Caribou Contests','Lecture Notes on Basic Topology: You Cheng Ye','Armstrong Topology','Hatcher AT','Munkres Topology','SimplicialTopology','3-Manifold Topology','Introduction to 3-Manifolds'
 ];
 
-export function ProblemEditor() {
+export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
   const store = useAppStore();
+  const defaults = useAppStore((s)=> s.defaults);
   const llm = useAppStore((s)=> s.llm);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
@@ -54,10 +55,18 @@ export function ProblemEditor() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
+  const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
+  const [dots, setDots] = useState(1);
 
   useEffect(() => {
     if (!current) return;
   }, [current]);
+
+  useEffect(() => {
+    if (llmStatus === 'idle' || llmStatus === 'done') return;
+    const timer = setInterval(() => setDots((d) => (d % 3) + 1), 500);
+    return () => clearInterval(timer);
+  }, [llmStatus]);
 
   // When a composed image is confirmed in Images module, show preview in Problems
   useEffect(() => {
@@ -116,8 +125,9 @@ export function ProblemEditor() {
       return;
     }
     if (!ensureLLM()) return;
-    const text = await ocrWithLLM(ocrImage, llm);
+    const text = await ocrWithLLM(ocrImage, llm, { onStatus: (s)=> setLlmStatus(s) });
     setOcrText(text);
+    setLlmStatus('done');
   };
 
   const applyOcrText = () => {
@@ -141,27 +151,32 @@ export function ProblemEditor() {
     const text = (current as any)[field] as string;
     if (!text?.trim()) return;
     if (!ensureLLM()) return;
-    const corrected = await latexCorrection(text, llm);
+    const corrected = await latexCorrection(text, llm, { onStatus: (s)=> setLlmStatus(s) });
     update({ [field]: corrected } as any);
+    setLlmStatus('done');
   };
 
   const generate = async () => {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
     if (!ensureLLM()) return;
-    const patch = await generateProblemFromText(input, current.questionType, llm);
+    const patch = await generateProblemFromText(input, current.questionType, llm, { onStatus: (s)=> setLlmStatus(s) });
     update(patch);
+    setLlmStatus('done');
   };
 
   const ensureOptionsForMC = () => {
     if (current.questionType === 'Multiple Choice') {
-      if (!current.options || current.options.length !== 5) {
-        update({ options: ['', '', '', '', ''] });
+      const count = Math.max(2, defaults.optionsCount || 5);
+      if (!current.options || current.options.length !== count) {
+        const next = Array.from({ length: count }, (_, i) => current.options?.[i] ?? '');
+        update({ options: next });
       }
     }
   };
 
   useEffect(() => { ensureOptionsForMC(); }, [current.questionType]);
+  useEffect(() => { ensureOptionsForMC(); }, [defaults.optionsCount]);
 
   // ----- Subfield helpers -----
   const selectedSubfields = useMemo(() => (current.subfield ? current.subfield.split(';').filter(Boolean) : []), [current.subfield]);
@@ -229,16 +244,19 @@ export function ProblemEditor() {
           </select>
           <div className="small" style={{marginTop:6}}>{t('type_hint')}</div>
 
-          <div className="row" style={{marginTop:8}}>
+          <div className="row" style={{marginTop:8, alignItems:'center', justifyContent:'space-between'}}>
             <button className="primary" onClick={generate}>{t('generate')}</button>
+            {(llmStatus !== 'idle' && llmStatus !== 'done') && (
+              <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+            )}
           </div>
 
           {current.questionType === 'Multiple Choice' && (
             <div style={{marginTop:12}}>
               <div className="label">{t('options')}</div>
               <div className="options-grid">
-                {[0,1,2,3,4].map((i, idx) => (
-                  <input key={i} value={current.options[idx] || ''} onChange={(e)=>{
+                {Array.from({ length: Math.max(2, defaults.optionsCount || current.options.length || 5) }).map((_, idx) => (
+                  <input key={idx} value={current.options[idx] || ''} onChange={(e)=>{
                     const next = [...(current.options||[])];
                     next[idx] = e.target.value;
                     update({ options: next });
@@ -379,6 +397,9 @@ export function ProblemEditor() {
                 <option value={2}>2</option>
                 <option value={3}>3</option>
               </select>
+            </div>
+            <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end'}}>
+              <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
             </div>
           </div>
         </div>

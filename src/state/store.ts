@@ -13,7 +13,7 @@ export interface ProblemRecord {
   id: string; // timestamp ms
   question: string;
   questionType: 'Multiple Choice' | 'Fill-in-the-blank' | 'Proof';
-  options: string[]; // A-E
+  options: string[]; // A.. variable length, default 5
   answer: string; // could be JSON for multi answers or proof latex
   subfield: string; // semicolon joined
   source: string;
@@ -33,6 +33,11 @@ interface AppState {
   upsertProblem: (p: Partial<ProblemRecord>) => void;
   newProblem: () => void;
   deleteProblem: (id: string) => void;
+  // Defaults and maintenance
+  defaults: DefaultSettings;
+  setDefaults: (p: Partial<DefaultSettings>) => void;
+  applyOptionsCountToExisting: (count: number) => void;
+  clearAllProblems: () => void;
 }
 
 const initialLLM: LLMConfigState = (() => {
@@ -43,18 +48,34 @@ const initialLLM: LLMConfigState = (() => {
 
 const initialMode: Mode = 'agent';
 
+export interface DefaultSettings {
+  subfield: string;
+  source: string;
+  academicLevel: 'K12' | 'Professional';
+  difficulty: 1 | 2 | 3;
+  optionsCount: number; // default 5
+}
+
+const initialDefaults: DefaultSettings = (() => {
+  const raw = localStorage.getItem('defaults');
+  if (raw) {
+    try { return JSON.parse(raw) as DefaultSettings; } catch {}
+  }
+  return { subfield: '', source: '', academicLevel: 'K12', difficulty: 1, optionsCount: 5 };
+})();
+
 const emptyProblem = (): ProblemRecord => ({
   id: `${Date.now()}`,
   question: '',
   questionType: 'Multiple Choice',
-  options: ['', '', '', '', ''],
+  options: Array.from({ length: initialDefaults.optionsCount }, () => ''),
   answer: '',
-  subfield: '',
-  source: '',
+  subfield: initialDefaults.subfield,
+  source: initialDefaults.source,
   image: '',
   imageDependency: 0,
-  academicLevel: 'K12',
-  difficulty: 1,
+  academicLevel: initialDefaults.academicLevel,
+  difficulty: initialDefaults.difficulty,
 });
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -69,6 +90,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = { ...get().llm, ...p };
     localStorage.setItem('llm-config', JSON.stringify(next));
     set({ llm: next });
+  },
+  // Defaults
+  defaults: initialDefaults,
+  setDefaults: (p) => {
+    const prev = get().defaults;
+    const next: DefaultSettings = { ...prev, ...p };
+    localStorage.setItem('defaults', JSON.stringify(next));
+    set({ defaults: next });
   },
   problems: (() => {
     const raw = localStorage.getItem('problems');
@@ -114,5 +143,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ problems: next });
     }
+  },
+  applyOptionsCountToExisting: (count: number) => {
+    const next = get().problems.map((p) => {
+      if (p.questionType !== 'Multiple Choice') return p;
+      const opts = Array.from({ length: count }, (_, i) => p.options?.[i] ?? '');
+      let answer = p.answer;
+      // If answer is a single letter beyond range, clear it
+      if (/^[A-Z]$/.test(answer)) {
+        const idx = answer.charCodeAt(0) - 65;
+        if (idx < 0 || idx >= count) answer = '';
+      }
+      return { ...p, options: opts, answer };
+    });
+    localStorage.setItem('problems', JSON.stringify(next));
+    set({ problems: next });
+  },
+  clearAllProblems: () => {
+    // Remove all problems and related pointers
+    localStorage.removeItem('problems');
+    localStorage.removeItem('currentId');
+    // Remove per-problem image blocks cache, if any
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('image-blocks-')) toRemove.push(k);
+      }
+      toRemove.forEach((k) => localStorage.removeItem(k));
+    } catch {}
+    const first = emptyProblem();
+    localStorage.setItem('problems', JSON.stringify([first]));
+    localStorage.setItem('currentId', first.id);
+    set({ problems: [first], currentId: first.id });
   }
 }));

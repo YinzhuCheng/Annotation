@@ -31,8 +31,6 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .grid-2 { grid-template-columns: 1fr 1fr; }
 .options-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .options-grid input { width: 100%; }
-/* Make the 5th (E) option span full row */
-.options-grid > *:nth-child(5) { grid-column: 1 / -1; }
 .card { border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--surface); overflow:hidden; }
 .label { display:block; margin-bottom:6px; color: var(--muted); font-size: 12px; }
 .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }

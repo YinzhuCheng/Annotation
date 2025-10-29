@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
-import { chat } from '../lib/llmAdapter';
+import { chatStream } from '../lib/llmAdapter';
 
 export function LLMConfig() {
   const { t } = useTranslation();
@@ -13,6 +13,14 @@ export function LLMConfig() {
   const [testMsg, setTestMsg] = useState('');
   const [reply, setReply] = useState<string>('');
   const [err, setErr] = useState<string>('');
+  const [status, setStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
+  const [dots, setDots] = useState(1);
+
+  useEffect(() => {
+    if (status === 'idle' || status === 'done') return;
+    const timer = setInterval(() => setDots((d) => (d % 3) + 1), 500);
+    return () => clearInterval(timer);
+  }, [status]);
 
   const save = () => {
     setLLM({ ...llm });
@@ -66,20 +74,29 @@ export function LLMConfig() {
       <div className="grid" style={{gridTemplateColumns:'1fr auto', gap:8}}>
         <input placeholder={t('yourMessage')} value={testMsg} onChange={(e)=> setTestMsg(e.target.value)} />
         <button onClick={async ()=>{
-          setErr(''); setReply('');
+          setErr(''); setReply(''); setStatus('idle');
           try {
             if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
               throw new Error(t('llmMissingBody'));
             }
-            const text = await chat([{ role:'user', content: testMsg }], llm);
-            setReply(text);
+            await chatStream([{ role:'user', content: testMsg }], llm, undefined, {
+              onStatus: (s) => setStatus(s),
+              onToken: (tok) => setReply((r)=> r + tok)
+            });
           } catch (e:any) {
             setErr(String(e?.message || e));
+          } finally {
+            setStatus('done');
           }
         }}>{t('testLLM')}</button>
       </div>
-      {(reply || err) && (
+      {(reply || err || (status !== 'idle' && status !== 'done')) && (
         <div className="card" style={{marginTop:8}}>
+          {(status !== 'idle' && status !== 'done') && (
+            <div className="small" style={{marginBottom:8}}>
+              {status === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}
+            </div>
+          )}
           {reply && (
             <>
               <div className="label">{t('llmReply')}</div>

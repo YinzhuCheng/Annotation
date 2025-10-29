@@ -73,6 +73,7 @@ const resources = {
       quota: 'Quota',
       notAvailable: 'N/A',
       clearCache: 'Clear Cache',
+      clearBank: 'Clear Question Bank',
       resultLabel: 'Result',
       prev: 'Previous',
       next: 'Next',
@@ -84,6 +85,8 @@ const resources = {
       testLLM: 'Test LLM',
       yourMessage: 'Your message',
       send: 'Send',
+      waitingLLMResponse: 'Waiting for LLM response',
+      waitingLLMThinking: 'Waiting for LLM thinking',
       llmReply: 'LLM Reply',
       llmError: 'LLM Error',
       llmMissingTitle: 'LLM configuration required',
@@ -100,6 +103,15 @@ const resources = {
       viewLarge: 'View large',
       back: 'Back'
       , zoomHint: 'Ctrl + Wheel to zoom • Drag to pan • Double-click to reset'
+      , defaultValues: 'Default Values'
+      , editDefaults: 'Adjust Default Values'
+      , defaultOptionsCount: 'Default choices count (Multiple Choice)'
+      , cancel: 'Cancel'
+      , confirm: 'Confirm'
+      , clearBankTitle: 'Clear Question Bank'
+      , clearBankInstruction: 'If you want to clear the current question bank cache, please type below: "CONFIRM CLEAR BANK". Before clearing, please be sure to download the question bank to your local device.'
+      , clearConfirmPhrase_en: 'CONFIRM CLEAR BANK'
+      , clearConfirmPhrase_zh: '确认清空题库'
     }
   },
   zh: {
@@ -173,6 +185,7 @@ const resources = {
       quota: '配额',
       notAvailable: '不可用',
       clearCache: '清理缓存',
+      clearBank: '清空题库',
       resultLabel: '结果',
       prev: '上一题',
       next: '下一题',
@@ -184,6 +197,8 @@ const resources = {
       testLLM: '测试 LLM',
       yourMessage: '你的消息',
       send: '发送',
+      waitingLLMResponse: '等待 LLM 响应',
+      waitingLLMThinking: '等待 LLM 思考',
       llmReply: 'LLM 回复',
       llmError: 'LLM 错误',
       llmMissingTitle: '需要配置 LLM',
@@ -200,6 +215,15 @@ const resources = {
       viewLarge: '看大图',
       back: '返回',
       zoomHint: '按住 Ctrl 滚轮缩放 • 拖拽平移 • 双击重置'
+      , defaultValues: '默认值'
+      , editDefaults: '调整默认值'
+      , defaultOptionsCount: '默认选项数量（选择题）'
+      , cancel: '取消'
+      , confirm: '确认'
+      , clearBankTitle: '清空题库'
+      , clearBankInstruction: '若想清空目前的题库缓存，请在下方输入：“确认清空题库”。在清空题库前请务必把题库下载到本地。'
+      , clearConfirmPhrase_en: 'CONFIRM CLEAR BANK'
+      , clearConfirmPhrase_zh: '确认清空题库'
     }
   }
 };

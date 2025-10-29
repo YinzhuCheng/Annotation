@@ -30,14 +30,14 @@ export const onRequestPost: PagesFunction = async (context) => {
         messages,
         temperature: extra?.temperature ?? 0,
         max_tokens: extra?.maxTokens ?? 1024,
-        stream: false
+        stream: true
       } as any;
       const r = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${llm.apiKey}`,
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'text/event-stream'
         },
         body: JSON.stringify(payload)
       });
@@ -45,16 +45,30 @@ export const onRequestPost: PagesFunction = async (context) => {
         const errText = await r.text().catch(() => '');
         return new Response(JSON.stringify({ error: errText || `HTTP ${r.status}` }), { status: r.status });
       }
-      // Try to parse JSON; if it fails, surface the raw text for debugging
-      let j: any;
-      try {
-        j = await r.json();
-      } catch (e: any) {
-        const raw = await r.text().catch(() => '');
-        return new Response(JSON.stringify({ error: raw || (e?.message || 'Non-JSON response from OpenAI-compatible endpoint') }), { status: 500 });
+      const upstream = r.body;
+      if (!upstream) {
+        return new Response(JSON.stringify({ error: 'No response body from upstream' }), { status: 500 });
       }
-      const text = j?.choices?.[0]?.message?.content || '';
-      return new Response(JSON.stringify({ text }), { headers: { 'Content-Type': 'application/json' } });
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const reader = upstream.getReader();
+          const pump = (): any => reader.read().then(({ done, value }) => {
+            if (done) { controller.close(); return; }
+            if (value) controller.enqueue(value);
+            return pump();
+          }).catch((err) => {
+            try { controller.error(err); } catch {}
+          });
+          return pump();
+        }
+      });
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive'
+        }
+      });
     }
 
     // Fallbacks to provider defaults are intentionally disabled.
