@@ -24,7 +24,7 @@ export function ImportExport() {
       p.question,
       p.questionType,
       (p.questionType === 'Multiple Choice') ? (JSON.stringify(
-        (p.options?.length===5 ? p.options : ['', '', '', '', '']).map((opt, i) => {
+        (p.options || []).map((opt, i) => {
           const label = String.fromCharCode(65 + i);
           const trimmed = String(opt || '').trim();
           if (!trimmed) return '';
@@ -64,7 +64,7 @@ export function ImportExport() {
       p.question,
       p.questionType,
       (p.questionType === 'Multiple Choice') ? (JSON.stringify(
-        (p.options?.length===5 ? p.options : ['', '', '', '', '']).map((opt, i) => {
+        (p.options || []).map((opt, i) => {
           const label = String.fromCharCode(65 + i);
           const trimmed = String(opt || '').trim();
           if (!trimmed) return '';
@@ -157,10 +157,8 @@ export function ImportExport() {
         try { options = JSON.parse(optionsRaw); } catch {}
       }
       if (questionType === 'Multiple Choice') {
-        // Normalize to 5 items
-        if (options.length !== 5) options = ['', '', '', '', ''];
-        // Strip leading "A:", "B:", etc. if present
-        options = options.map((opt, i) => {
+        // Strip leading label prefixes like "A:", "B:" if present
+        options = (Array.isArray(options) ? options : []).map((opt, i) => {
           const label = String.fromCharCode(65 + i);
           const s = String(opt || '');
           return s.replace(new RegExp(`^${label}\\s*:\\s*`), '');

@@ -8,11 +8,16 @@ import { ImportExport } from './components/ImportExport';
 import { ImageComposer } from './components/ImageComposer';
 import { useAppStore } from './state/store';
 import { estimateStorage } from './lib/storage';
+import { DefaultsPage } from './components/DefaultsPage';
+import { ClearBankPage } from './components/ClearBankPage';
+
+type Page = 'main' | 'defaults' | 'clear';
 
 export default function App() {
   const { t, i18n } = useTranslation();
   const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
   const { mode } = useAppStore();
+  const [page, setPage] = useState<Page>('main');
 
   useEffect(() => {
     estimateStorage().then(setStorageInfo).catch(() => setStorageInfo(null));
@@ -23,6 +28,39 @@ export default function App() {
     i18n.changeLanguage(next);
     localStorage.setItem('lang', next);
   };
+
+  if (page === 'defaults') {
+    return (
+      <>
+        <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
+        <div className="container">
+          <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
+            <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+              <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+              {t('title')}
+            </h2>
+          </div>
+          <DefaultsPage onBack={() => setPage('main')} />
+        </div>
+      </>
+    );
+  }
+  if (page === 'clear') {
+    return (
+      <>
+        <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
+        <div className="container">
+          <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
+            <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+              <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+              {t('title')}
+            </h2>
+          </div>
+          <ClearBankPage onBack={() => setPage('main')} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -49,6 +87,9 @@ export default function App() {
         <div className="card">
           <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
             <div className="label">{t('settingsBlock')}</div>
+            <div className="row" style={{gap:8}}>
+              <button onClick={()=> setPage('defaults')}>{t('editDefaults')}</button>
+            </div>
           </div>
           <LLMConfig />
           <hr className="div" />
@@ -57,7 +98,7 @@ export default function App() {
 
         <div className="card" style={{marginTop:16}}>
           <div className="label">{t('problemsBlock')}</div>
-          <ProblemEditor />
+          <ProblemEditor onOpenClear={()=> setPage('clear')} />
         </div>
 
         <div className="card" style={{marginTop: 16}}>
