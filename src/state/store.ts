@@ -9,7 +9,7 @@ export interface LLMConfigState {
   model: string;
 }
 
-export type AgentId = 'ocr' | 'latex' | 'generator';
+export type AgentId = 'ocr' | 'latex' | 'generator' | 'translator';
 
 export interface LLMAgentSettings {
   config: LLMConfigState;
@@ -64,10 +64,11 @@ const DEFAULT_OPTIONS_COUNT = 5;
 const DEFAULT_AGENT_PROMPTS: Record<AgentId, string> = {
   ocr: 'You are an OCR engine. Transcribe all readable text from the image into plain UTF-8 text. Preserve math expressions as text (no LaTeX unless present), keep line breaks where meaningful, and do not add commentary.',
   latex: 'You are a LaTeX normalizer. Convert nonstandard math symbols into valid LaTeX macros with minimal changes. Return only the corrected text.',
-  generator: `You are an expert math problem generator and formatter.\nOutput strictly a compact JSON object with keys: question, questionType, options, answer, subfield, academicLevel, difficulty.\nRules:\n- question: rewrite or polish the input to the requested type.\n- questionType: exactly one of ["Multiple Choice","Fill-in-the-blank","Proof"].\n- options: if Multiple Choice, provide the required count of LaTeX-ready strings labeled A..; otherwise [].\n- answer: For MC use a single letter or array of letters; FITB return the correct content string; Proof provide full proof steps.\n- subfield: choose from the supplied list when possible, else "Others".\n- academicLevel: choose from the supplied list.\n- difficulty: choose from the supplied list.\nReturn JSON only.`
+  generator: `You are an expert math problem generator and formatter.\nOutput strictly a compact JSON object with keys: question, questionType, options, answer, subfield, academicLevel, difficulty.\nRules:\n- question: rewrite or polish the input to the requested type.\n- questionType: exactly one of ["Multiple Choice","Fill-in-the-blank","Proof"].\n- options: if Multiple Choice, provide the required count of LaTeX-ready strings labeled A..; otherwise [].\n- answer: For MC use a single letter or array of letters; FITB return the correct content string; Proof provide full proof steps.\n- subfield: choose from the supplied list when possible, else "Others".\n- academicLevel: choose from the supplied list.\n- difficulty: choose from the supplied list.\nReturn JSON only.`,
+  translator: `You are a precise bilingual translator for mathematics education content. Maintain mathematical notation and LaTeX as-is, keep any bullet or numbered structure, and return only the translated text in the target language without additional commentary.`
 };
 
-const AGENT_IDS: AgentId[] = ['ocr', 'latex', 'generator'];
+const AGENT_IDS: AgentId[] = ['ocr', 'latex', 'generator', 'translator'];
 
 function sanitizeList(input: unknown, fallback: string[]): string[] {
   const arr = Array.isArray(input) ? input : [];
@@ -172,7 +173,8 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
       const sanitized: Record<AgentId, LLMAgentSettings> = {
         ocr: sanitizeAgentSettings(parsed?.ocr, DEFAULT_AGENT_PROMPTS.ocr),
         latex: sanitizeAgentSettings(parsed?.latex, DEFAULT_AGENT_PROMPTS.latex),
-        generator: sanitizeAgentSettings(parsed?.generator, DEFAULT_AGENT_PROMPTS.generator)
+        generator: sanitizeAgentSettings(parsed?.generator, DEFAULT_AGENT_PROMPTS.generator),
+        translator: sanitizeAgentSettings(parsed?.translator, DEFAULT_AGENT_PROMPTS.translator)
       };
       localStorage.setItem('llm-agents', JSON.stringify(sanitized));
       return sanitized;
@@ -186,7 +188,8 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
   const fallback: Record<AgentId, LLMAgentSettings> = {
     ocr: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.ocr },
     latex: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.latex },
-    generator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.generator }
+    generator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.generator },
+    translator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.translator }
   };
   localStorage.setItem('llm-agents', JSON.stringify(fallback));
   return fallback;

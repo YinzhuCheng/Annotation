@@ -14,7 +14,8 @@ function cloneAgentsState(source: Record<AgentId, LLMAgentSettings>): Record<Age
   return {
     ocr: { config: { ...source.ocr.config }, prompt: source.ocr.prompt },
     latex: { config: { ...source.latex.config }, prompt: source.latex.prompt },
-    generator: { config: { ...source.generator.config }, prompt: source.generator.prompt }
+    generator: { config: { ...source.generator.config }, prompt: source.generator.prompt },
+    translator: { config: { ...source.translator.config }, prompt: source.translator.prompt }
   };
 }
 
@@ -27,7 +28,7 @@ export function LLMConfig() {
   const saveAgentSettings = useAppStore((s) => s.saveAgentSettings);
 
   const [drafts, setDrafts] = useState<Record<AgentId, LLMAgentSettings>>(() => cloneAgentsState(agents));
-  const [savedAt, setSavedAt] = useState<Record<AgentId, number | null>>({ ocr: null, latex: null, generator: null });
+  const [savedAt, setSavedAt] = useState<Record<AgentId, number | null>>({ ocr: null, latex: null, generator: null, translator: null });
   const [editingPrompt, setEditingPrompt] = useState<PromptEditorState>(null);
   const [testMsg, setTestMsg] = useState('');
   const [testAgentId, setTestAgentId] = useState<AgentId>('generator');
@@ -58,7 +59,8 @@ export function LLMConfig() {
   const agentDefs = useMemo<AgentDefinition[]>(() => ([
     { id: 'ocr', title: t('agentOcr'), description: t('agentOcrDesc') },
     { id: 'latex', title: t('agentLatex'), description: t('agentLatexDesc') },
-    { id: 'generator', title: t('agentGenerator'), description: t('agentGeneratorDesc') }
+    { id: 'generator', title: t('agentGenerator'), description: t('agentGeneratorDesc') },
+    { id: 'translator', title: t('agentTranslator'), description: t('agentTranslatorDesc') }
   ]), [t]);
 
   const agentTitles = useMemo<Record<AgentId, string>>(() => (
