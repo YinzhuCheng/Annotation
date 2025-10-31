@@ -54,6 +54,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [translationStatus, setTranslationStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [translationTarget, setTranslationTarget] = useState<'en' | 'zh'>('zh');
   const [translationError, setTranslationError] = useState('');
+  const [generatorPreview, setGeneratorPreview] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -172,8 +173,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!input) return;
     if (!ensureAgent('generator')) return;
     setLlmStatusSource('generate');
+    setGeneratorPreview('');
     const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
     update(patch);
+    setGeneratorPreview(JSON.stringify(patch, null, 2));
     setLlmStatus('done');
   };
 
@@ -473,6 +476,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                 )}
               </div>
+              {generatorPreview && (
+                <div style={{marginTop:8}}>
+                  <div className="label" style={{marginBottom:4}}>{t('llmReply')}</div>
+                  <textarea readOnly value={generatorPreview} rows={8} style={{width:'100%', fontFamily:'var(--font-mono, monospace)'}} />
+                </div>
+              )}
             </div>
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
