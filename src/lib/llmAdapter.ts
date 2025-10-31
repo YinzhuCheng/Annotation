@@ -123,3 +123,20 @@ export async function ocrWithLLM(
   ], agent.config, { temperature: 0 }, handlers);
   return out.trim();
 }
+
+export async function translateWithLLM(
+  input: string,
+  target: 'en' | 'zh',
+  agent: LLMAgentSettings,
+  handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }
+): Promise<string> {
+  const system = agent.prompt?.trim() || 'You are a precise bilingual translator for mathematics education content. Maintain mathematical notation and LaTeX as-is, keep any bullet or numbered structure, and return only the translated text in the target language without additional commentary.';
+  const instructions = target === 'en'
+    ? 'Translate the provided content into English. Keep LaTeX and math notation untouched. Return English text only.'
+    : '将以下内容翻译为中文，保持原有的数学符号与 LaTeX 表达不变。仅返回中文文本。';
+  const out = await chatStream([
+    { role: 'system', content: system },
+    { role: 'user', content: `${instructions}\n\n${input}` }
+  ], agent.config, { temperature: 0 }, handlers);
+  return out.trim();
+}

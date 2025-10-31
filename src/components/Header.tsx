@@ -16,7 +16,6 @@ export function Header({ onHelp, onToggleLang }: { onHelp: () => void; onToggleL
   return (
     <header>
       <div className="row">
-        <span className="badge">{t('localFirst')}</span>
         <img src="/logo.svg" alt="Logo" style={{height:28, width:28, borderRadius:6}} />
         <strong>{t('title')}</strong>
       </div>

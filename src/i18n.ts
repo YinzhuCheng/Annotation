@@ -6,7 +6,6 @@ const resources = {
     translation: {
       title: 'Dataset Annotation Program',
       help: 'Help',
-      localFirst: 'Local-First',
       language: '中文/EN',
       manualMode: 'Manual Mode',
       agentMode: 'LLM Agent Mode',
@@ -119,6 +118,8 @@ const resources = {
       , agentLatexDesc: 'Normalizes mathematical expressions into LaTeX.'
       , agentGenerator: 'Problem Generation Agent'
       , agentGeneratorDesc: 'Creates draft problems and solutions.'
+      , agentTranslator: 'Translation Agent'
+      , agentTranslatorDesc: 'Translates questions or answers between English and Chinese.'
       , agentEditPrompt: 'Set Prompt'
       , agentCopyPlaceholder: 'Copy config from…'
       , agentPromptEditorTitle: 'Edit prompt for {{agent}}'
@@ -136,13 +137,23 @@ const resources = {
       , defaultsDifficultyHint: 'These values populate the difficulty selector.'
       , defaultsDifficultyPromptLabel: 'Difficulty label shown in the editor'
       , defaultsOptionsCountHint: 'Applies to newly created multiple choice problems.'
+      , translationHelper: 'Translation assistant'
+      , translationLoadQuestion: 'Load question'
+      , translationLoadAnswer: 'Load answer'
+      , translationTargetZh: 'Translate to Chinese'
+      , translationTargetEn: 'Translate to English'
+      , translationRun: 'Run translation'
+      , translationInputLabel: 'Source text'
+      , translationOutputLabel: 'Translated text'
+      , translationApplyQuestion: 'Replace question with translation'
+      , translationApplyAnswer: 'Replace answer with translation'
+      , translationInputMissing: 'Provide text before translating.'
     }
   },
   zh: {
     translation: {
       title: '数据集标注程序',
       help: '帮助',
-      localFirst: '本地优先',
       language: '中文/EN',
       manualMode: '手动模式',
       agentMode: 'LLM 代理模式',
@@ -255,6 +266,8 @@ const resources = {
       , agentLatexDesc: '将数学表达式标准化为 LaTeX。'
       , agentGenerator: '题目生成代理'
       , agentGeneratorDesc: '负责生成题目与解答草稿。'
+      , agentTranslator: '翻译代理'
+      , agentTranslatorDesc: '用于在中英文之间转换题目或答案。'
       , agentEditPrompt: '设置提示词'
       , agentCopyPlaceholder: '从其他代理复制配置…'
       , agentPromptEditorTitle: '编辑 {{agent}} 的提示词'
@@ -272,6 +285,17 @@ const resources = {
       , defaultsDifficultyHint: '这些值将用于难度选择。'
       , defaultsDifficultyPromptLabel: '难度标签（编辑器显示）'
       , defaultsOptionsCountHint: '影响新建选择题的默认选项数。'
+      , translationHelper: '翻译助手'
+      , translationLoadQuestion: '载入题目文本'
+      , translationLoadAnswer: '载入答案文本'
+      , translationTargetZh: '翻译为中文'
+      , translationTargetEn: '翻译为英文'
+      , translationRun: '执行翻译'
+      , translationInputLabel: '原始文本'
+      , translationOutputLabel: '译文'
+      , translationApplyQuestion: '将译文写入题目'
+      , translationApplyAnswer: '将译文写入答案'
+      , translationInputMissing: '请先输入需要翻译的内容。'
     }
   }
 };

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
-import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
+import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText } from '../lib/generator';
@@ -47,22 +47,33 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [dots, setDots] = useState(1);
+  const [translationInput, setTranslationInput] = useState('');
+  const [translationOutput, setTranslationOutput] = useState('');
+  const [translationStatus, setTranslationStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
+  const [translationTarget, setTranslationTarget] = useState<'en' | 'zh'>('zh');
+  const [translationError, setTranslationError] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
-    generator: t('agentGenerator')
+    generator: t('agentGenerator'),
+    translator: t('agentTranslator')
   }), [t]);
   const CUSTOM_OPTION = '__custom__';
 
   useEffect(() => {
     if (!current) return;
-  }, [current]);
+    setTranslationInput(current.question || '');
+    setTranslationOutput('');
+    setTranslationError('');
+    setTranslationStatus('idle');
+  }, [current.id]);
 
   useEffect(() => {
-    if (llmStatus === 'idle' || llmStatus === 'done') return;
+    const active = (llmStatus !== 'idle' && llmStatus !== 'done') || (translationStatus !== 'idle' && translationStatus !== 'done');
+    if (!active) return;
     const timer = setInterval(() => setDots((d) => (d % 3) + 1), 500);
     return () => clearInterval(timer);
-  }, [llmStatus]);
+  }, [llmStatus, translationStatus]);
 
   // When a composed image is confirmed in Images module, show preview in Problems
   useEffect(() => {
@@ -161,6 +172,30 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLlmStatus('done');
   };
 
+  const runTranslation = async () => {
+    const payload = translationInput.trim();
+    if (!payload) {
+      alert(t('translationInputMissing'));
+      return;
+    }
+    if (!ensureAgent('translator')) return;
+    setTranslationError('');
+    setTranslationStatus('waiting_response');
+    try {
+      const output = await translateWithLLM(payload, translationTarget, agents.translator, { onStatus: (s) => setTranslationStatus(s) });
+      setTranslationOutput(output);
+    } catch (err: any) {
+      setTranslationError(String(err?.message || err));
+    } finally {
+      setTranslationStatus('done');
+    }
+  };
+
+  const loadTranslationFrom = (field: 'question' | 'answer') => {
+    const source = (current as any)[field] as string;
+    setTranslationInput(source || '');
+  };
+
   const ensureOptionsForMC = () => {
     if (current.questionType === 'Multiple Choice') {
       const count = Math.max(2, defaults.optionsCount || 5);
@@ -257,6 +292,41 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             {(llmStatus !== 'idle' && llmStatus !== 'done') && (
               <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
             )}
+          </div>
+
+          <div className="card" style={{marginTop:12, display:'flex', flexDirection:'column', gap:8}}>
+            <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+              <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
+              <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                <button type="button" onClick={() => loadTranslationFrom('question')}>{t('translationLoadQuestion')}</button>
+                <button type="button" onClick={() => loadTranslationFrom('answer')}>{t('translationLoadAnswer')}</button>
+                <select value={translationTarget} onChange={(e)=> setTranslationTarget(e.target.value as 'en' | 'zh')}>
+                  <option value="zh">{t('translationTargetZh')}</option>
+                  <option value="en">{t('translationTargetEn')}</option>
+                </select>
+                <button type="button" className="primary" onClick={runTranslation}>{t('translationRun')}</button>
+              </div>
+            </div>
+            {(translationStatus !== 'idle' && translationStatus !== 'done') && (
+              <span className="small">{translationStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+            )}
+            {translationError && (
+              <span className="small" style={{color:'#f87171'}}>{translationError}</span>
+            )}
+            <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:8}}>
+              <div>
+                <div className="label" style={{marginBottom:4}}>{t('translationInputLabel')}</div>
+                <textarea value={translationInput} onChange={(e)=> setTranslationInput(e.target.value)} rows={8} />
+              </div>
+              <div>
+                <div className="label" style={{marginBottom:4}}>{t('translationOutputLabel')}</div>
+                <textarea value={translationOutput} onChange={(e)=> setTranslationOutput(e.target.value)} rows={8} />
+              </div>
+            </div>
+            <div className="row" style={{justifyContent:'flex-end', gap:8, flexWrap:'wrap'}}>
+              <button type="button" onClick={()=> translationOutput && update({ question: translationOutput })}>{t('translationApplyQuestion')}</button>
+              <button type="button" onClick={()=> translationOutput && update({ answer: translationOutput })}>{t('translationApplyAnswer')}</button>
+            </div>
           </div>
 
           {current.questionType === 'Multiple Choice' && (
