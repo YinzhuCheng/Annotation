@@ -69,7 +69,7 @@ export async function generateProblemFromText(
   }
   user += '   - Fill-in-the-blank: insert explicit blanks such as "___". When the source only asserts existence, ask for a concrete witness or numerical property, and supply those exact values in the answer (use an ordered JSON array like ["4","9"] if multiple blanks exist).\n';
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
-  user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not append any text after the JSON block.\n';
+  user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, backticks, comments, or any text before or after the JSON object.\n';
 
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
@@ -81,7 +81,13 @@ export async function generateProblemFromText(
     console.error('LLM response missing JSON section', raw);
     throw new Error('LLM response missing JSON section');
   }
-  const jsonText = raw.slice(jsonMarker + 5).trim();
+  let jsonText = raw.slice(jsonMarker + 5).trim();
+  if (jsonText.startsWith('```')) {
+    const fenceEnd = jsonText.indexOf('```', 3);
+    if (fenceEnd !== -1) {
+      jsonText = jsonText.slice(3, fenceEnd).trim();
+    }
+  }
   if (!jsonText) {
     console.error('LLM response JSON section empty', raw);
     throw new Error('LLM response JSON section empty');
