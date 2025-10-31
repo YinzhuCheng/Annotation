@@ -167,7 +167,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
     if (!ensureAgent('generator')) return;
-    const patch = await generateProblemFromText(input, current.questionType, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
+    const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
     update(patch);
     setLlmStatus('done');
   };
