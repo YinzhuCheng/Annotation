@@ -47,6 +47,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
+  const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
   const [translationInput, setTranslationInput] = useState('');
   const [translationOutput, setTranslationOutput] = useState('');
@@ -133,6 +134,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       return;
     }
     if (!ensureAgent('ocr')) return;
+    setLlmStatusSource('ocr');
     const text = await ocrWithLLM(ocrImage, agents.ocr, { onStatus: (s)=> setLlmStatus(s) });
     setOcrText(text);
     setLlmStatus('done');
@@ -159,6 +161,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const text = (current as any)[field] as string;
     if (!text?.trim()) return;
     if (!ensureAgent('latex')) return;
+    setLlmStatusSource(field === 'question' ? 'latex_question' : 'latex_answer');
     const corrected = await latexCorrection(text, agents.latex, { onStatus: (s)=> setLlmStatus(s) });
     update({ [field]: corrected } as any);
     setLlmStatus('done');
@@ -168,6 +171,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
     if (!ensureAgent('generator')) return;
+    setLlmStatusSource('generate');
     const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
     update(patch);
     setLlmStatus('done');
@@ -310,8 +314,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div>
               <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
-              <div className="row" style={{justifyContent:'space-between'}}>
-                <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
+              <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+                <div className="row" style={{gap:6, alignItems:'center'}}>
+                  <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
+                  {(llmStatusSource === 'latex_question' && llmStatus !== 'idle' && llmStatus !== 'done') && (
+                    <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                  )}
+                </div>
                 <span className="small">{t('latexFixHint')}</span>
               </div>
             </div>
@@ -344,8 +353,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div>
               <div className="label">{t('answer')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <textarea value={current.answer} onChange={(e)=> update({ answer: e.target.value })} />
-              <div className="row" style={{justifyContent:'space-between'}}>
-                <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
+              <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+                <div className="row" style={{gap:6, alignItems:'center'}}>
+                  <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
+                  {(llmStatusSource === 'latex_answer' && llmStatus !== 'idle' && llmStatus !== 'done') && (
+                    <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                  )}
+                </div>
                 <span className="small">{t('latexFixHint')}</span>
               </div>
             </div>
@@ -455,7 +469,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               <div className="small" style={{marginTop:6, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
               <div className="row" style={{gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8}}>
                 <button className="primary" onClick={generate}>{t('generate')}</button>
-                {(llmStatus !== 'idle' && llmStatus !== 'done') && (
+                {(llmStatusSource === 'generate' && llmStatus !== 'idle' && llmStatus !== 'done') && (
                   <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                 )}
               </div>
@@ -470,12 +484,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                     <option value="zh">{t('translationTargetZh')}</option>
                     <option value="en">{t('translationTargetEn')}</option>
                   </select>
-                  <button type="button" className="primary" onClick={runTranslation}>{t('translationRun')}</button>
+                  <div className="row" style={{gap:6, alignItems:'center'}}>
+                    <button type="button" className="primary" onClick={runTranslation}>{t('translationRun')}</button>
+                    {(translationStatus !== 'idle' && translationStatus !== 'done') && (
+                      <span className="small">{translationStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                    )}
+                  </div>
                 </div>
               </div>
-              {(translationStatus !== 'idle' && translationStatus !== 'done') && (
-                <span className="small">{translationStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
-              )}
               {translationError && (
                 <span className="small" style={{color:'#f87171'}}>{translationError}</span>
               )}
@@ -522,8 +538,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </div>
               )}
 
-              <div className="row" style={{marginTop:8, gap:8}}>
-                <button onClick={runOCR}>{t('ocrExtract')}</button>
+              <div className="row" style={{marginTop:8, gap:8, alignItems:'center'}}>
+                <div className="row" style={{gap:6, alignItems:'center'}}>
+                  <button onClick={runOCR}>{t('ocrExtract')}</button>
+                  {(llmStatusSource === 'ocr' && llmStatus !== 'idle' && llmStatus !== 'done') && (
+                    <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                  )}
+                </div>
                 <button onClick={applyOcrText}>{t('confirmText')}</button>
               </div>
               {ocrText && (

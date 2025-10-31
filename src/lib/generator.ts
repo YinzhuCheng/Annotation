@@ -84,7 +84,7 @@ export async function generateProblemFromText(
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: user }
-  ], agent.config, { temperature: 0.2, maxTokens: 800 }, handlers);
+  ], agent.config, { temperature: 0.2 }, handlers);
 
   let obj: any = {};
   try { obj = JSON.parse(raw); } catch {
