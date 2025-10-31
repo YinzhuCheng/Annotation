@@ -91,7 +91,27 @@ export async function generateProblemFromText(
   const llmQuestion = typeof obj.question === 'string' ? obj.question.trim() : '';
   const question = llmQuestion || existingQuestion || baseInput;
 
-  const llmOptions = Array.isArray(obj.options) ? obj.options.map((o: any) => String(o ?? '').trim()) : [];
+  const rawOptions = (obj as any)?.options;
+  const llmOptions: string[] = (() => {
+    if (Array.isArray(rawOptions)) {
+      return rawOptions.map((o: any) => String(o ?? '').trim());
+    }
+    if (rawOptions && typeof rawOptions === 'object') {
+      return Object.entries(rawOptions as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+        .map(([, value]) => String(value ?? '').trim());
+    }
+    if (typeof rawOptions === 'string') {
+      const lines = rawOptions
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      if (lines.length > 0) {
+        return lines.map((line) => line.replace(/^[A-Z][\.\)]?\s*/i, '').trim());
+      }
+    }
+    return [];
+  })();
   const normalizedOptions = questionType === 'Multiple Choice'
     ? Array.from({ length: expectedOptionsCount }, (_, idx) => {
         const llmValue = llmOptions[idx]?.trim();

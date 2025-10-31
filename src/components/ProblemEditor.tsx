@@ -247,7 +247,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const ensureRequiredBeforeProceed = () => {
     const missing = Array.from(new Set(getMissingRequiredFields()));
     if (missing.length === 0) return true;
-    const message = t('requiredMissing', { fields: missing.join('?') });
+    const message = t('requiredMissing', { fields: missing.join(', ') });
     return window.confirm(message);
   };
 
@@ -290,12 +290,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         <div className="row" style={{gap:8, flexWrap:'wrap'}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
           <button onClick={handleSaveCurrent}>{t('saveProblem')}</button>
-          <button className="primary" onClick={generate}>{t('generate')}</button>
         </div>
         <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
-          {(llmStatus !== 'idle' && llmStatus !== 'done') && (
-            <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
-          )}
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
           <button onClick={goNext}>{t('next')}</button>
           <span className="small">ID: {current.id}</span>
@@ -309,42 +305,132 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
       <div className="grid grid-2">
         <div>
-          <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-          <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
-            <span className="small">{t('latexFixHint')}</span>
-          </div>
-
-          <div className="label" style={{marginTop:12}}>{t('targetType')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-          <select value={current.questionType} onChange={(e)=> update({ questionType: e.target.value as any })}>
-            <option value="Multiple Choice">{t('type_mc')}</option>
-            <option value="Fill-in-the-blank">{t('type_fitb')}</option>
-            <option value="Proof">{t('type_proof')}</option>
-          </select>
-          <div className="small" style={{marginTop:6}}>{t('type_hint')}</div>
-
-          {current.questionType === 'Multiple Choice' && (
-            <div style={{marginTop:12}}>
-              <div className="label">{t('options')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-              <div className="options-grid">
-                {Array.from({ length: Math.max(2, defaults.optionsCount || current.options.length || 5) }).map((_, idx) => (
-                  <input key={idx} value={current.options[idx] || ''} onChange={(e)=>{
-                    const next = [...(current.options||[])];
-                    next[idx] = e.target.value;
-                    update({ options: next });
-                  }} placeholder={String.fromCharCode(65 + idx)} />
-                ))}
+          <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+            <div>
+              <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
+              <div className="row" style={{justifyContent:'space-between'}}>
+                <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
+                <span className="small">{t('latexFixHint')}</span>
               </div>
             </div>
-          )}
 
-          <div style={{marginTop:12}}>
-            <div className="label">{t('answer')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-            <textarea value={current.answer} onChange={(e)=> update({ answer: e.target.value })} />
-            <div className="row" style={{justifyContent:'space-between'}}>
-              <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
-              <span className="small">{t('latexFixHint')}</span>
+            <div>
+              <div className="label">{t('targetType')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <select value={current.questionType} onChange={(e)=> update({ questionType: e.target.value as any })}>
+                <option value="Multiple Choice">{t('type_mc')}</option>
+                <option value="Fill-in-the-blank">{t('type_fitb')}</option>
+                <option value="Proof">{t('type_proof')}</option>
+              </select>
+              <div className="small" style={{marginTop:6}}>{t('type_hint')}</div>
+            </div>
+
+            {current.questionType === 'Multiple Choice' && (
+              <div>
+                <div className="label">{t('options')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+                <div className="options-grid">
+                  {Array.from({ length: Math.max(2, defaults.optionsCount || current.options.length || 5) }).map((_, idx) => (
+                    <input key={idx} value={current.options[idx] || ''} onChange={(e)=>{
+                      const next = [...(current.options||[])];
+                      next[idx] = e.target.value;
+                      update({ options: next });
+                    }} placeholder={String.fromCharCode(65 + idx)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <div className="label">{t('answer')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <textarea value={current.answer} onChange={(e)=> update({ answer: e.target.value })} />
+              <div className="row" style={{justifyContent:'space-between'}}>
+                <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
+                <span className="small">{t('latexFixHint')}</span>
+              </div>
+            </div>
+            <div>
+              <div className="label">{t('subfield')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                <select
+                  onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>--</option>
+                  {subfieldOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
+                </select>
+                {showCustomSubfield && (
+                  <div className="row" style={{gap:8}}>
+                    <input ref={customSubfieldInputRef} value={customSubfield} placeholder={t('subfield_others')} onChange={(e)=> setCustomSubfield(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') confirmCustomSubfield(); }} />
+                    <button onClick={confirmCustomSubfield}>{t('confirmText')}</button>
+                  </div>
+                )}
+                {selectedSubfields.length > 0 && (
+                  <div className="row" style={{gap:6, flexWrap:'wrap'}}>
+                    {selectedSubfields.map(s => (
+                      <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
+                        {s}
+                        <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>?</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="row" style={{gap:8, width:'100%'}}>
+                  <span className="small">{t('resultLabel')}:</span>
+                  <input style={{flex:1, minWidth:0}} value={current.subfield} readOnly />
+                </div>
+                <span className="small">{t('selectSubfieldHint')}</span>
+              </div>
+            </div>
+
+            <div>
+              <div className="label">{t('source')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                <select
+                  value={sourceSelectValue}
+                  onChange={(e)=>{
+                    const v = e.target.value;
+                    if (v === CUSTOM_OPTION) {
+                      update({ source: '' });
+                      setTimeout(()=> customSourceInputRef.current?.focus(), 0);
+                    } else {
+                      update({ source: v });
+                    }
+                  }}
+                >
+                  {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
+                </select>
+                <input
+                  ref={customSourceInputRef}
+                  placeholder={t('subfield_others')}
+                  value={current.source}
+                  onChange={(e)=> update({ source: e.target.value })}
+                  style={{flex:1, minWidth:0}}
+                />
+              </div>
+            </div>
+
+            <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr', gap:8}}>
+              <div>
+                <div className="label">{t('academic')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+                <select value={current.academicLevel} onChange={(e)=> update({ academicLevel: e.target.value })}>
+                  {academicSelectOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="label">{difficultyLabel}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+                <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
+                  {difficultySelectOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end'}}>
+                <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
+              </div>
             </div>
           </div>
         </div>
@@ -362,7 +448,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
             </div>
           )}
-          <div className="card" style={{marginBottom:12, display:'flex', flexDirection:'column', gap:12}}>
+          <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+            <div>
+              <div className="label" style={{margin:0}}>{t('llmAssist')}</div>
+              <div className="row" style={{gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8}}>
+                <button className="primary" onClick={generate}>{t('generate')}</button>
+                {(llmStatus !== 'idle' && llmStatus !== 'done') && (
+                  <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                )}
+              </div>
+            </div>
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
                 <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
@@ -432,70 +527,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               {ocrText && (
                 <textarea style={{marginTop:8}} value={ocrText} onChange={(e)=> setOcrText(e.target.value)} />
               )}
-            </div>
-          </div>
-
-          <div className="card" style={{marginTop:12}}>
-            <div className="label">{t('subfield')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-            <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-              <select
-                onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }}
-                defaultValue=""
-              >
-                <option value="" disabled>?</option>
-                {subfieldOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
-              </select>
-              {showCustomSubfield && (
-                <div className="row" style={{gap:8}}>
-                  <input ref={customSubfieldInputRef} value={customSubfield} placeholder={t('subfield_others')} onChange={(e)=> setCustomSubfield(e.target.value)} onKeyDown={(e)=>{ if (e.key==='Enter') confirmCustomSubfield(); }} />
-                  <button onClick={confirmCustomSubfield}>{t('confirmText')}</button>
-                </div>
-              )}
-              {selectedSubfields.length > 0 && (
-                <div className="row" style={{gap:6, flexWrap:'wrap'}}>
-                  {selectedSubfields.map(s => (
-                    <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
-                      {s}
-                      <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>?</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {/* Display the final joined result */}
-              <div className="row" style={{gap:8, width:'100%'}}>
-                <span className="small">{t('resultLabel')}:</span>
-                <input style={{flex:1, minWidth:0}} value={current.subfield} readOnly />
-              </div>
-              <span className="small">{t('selectSubfieldHint')}</span>
-            </div>
-          </div>
-
-          <div style={{marginTop:12}}>
-            <div className="label">{t('source')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-            <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-              <select
-                value={sourceSelectValue}
-                onChange={(e)=>{
-                  const v = e.target.value;
-                  if (v === CUSTOM_OPTION) {
-                    update({ source: '' });
-                    setTimeout(()=> customSourceInputRef.current?.focus(), 0);
-                  } else {
-                    update({ source: v });
-                  }
-                }}
-              >
-                {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
-              </select>
-              <input
-                ref={customSourceInputRef}
-                placeholder={t('subfield_others')}
-                value={current.source}
-                onChange={(e)=> update({ source: e.target.value })}
-                style={{flex:1, minWidth:0}}
-              />
             </div>
           </div>
 

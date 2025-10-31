@@ -107,7 +107,7 @@ export default function App() {
       </div>
 
       <div style={{ marginTop: 24, marginBottom: 24, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-        ?????????????????chengyinzhu@bimsa.cn
+        {t('footerContact')}
       </div>
 
       {/* Help moved to standalone page at /help.html */}
