@@ -57,18 +57,19 @@ export async function generateProblemFromText(
   user += `- difficulty options: ${difficultyList}\n\n`;
 
   user += 'Instructions:\n';
-  user += '- Preserve supplied information; thoughtful rewrites are welcome when they improve clarity or enforce the selected question type.\n';
-  user += '- Fill every "<missing>" entry using the source text and allowed values.\n';
+  user += '- Honor constraints first. Treat the "Current record snapshot" as authoritative for populated fields unless it explicitly flags a rewrite (e.g., "<force rewrite>" or a directive in the constraints list).\n';
+  user += '- Fill every "<missing>" or blank field using the source text plus your own reasoning. Choose metadata only from the allowed lists (prepend "Others: ..." if nothing fits).\n';
+  user += '- Embrace adaptive rewriting. You may restructure, shorten, expand, translate, or restate the problem to satisfy constraints and the target question type; aim for natural, fluent prose and accurate mathematics.\n';
   user += '- Make the resulting question self-contained by defining or restating any concept that would otherwise be ambiguous.\n';
   user += `- Keep questionType as "${targetType}".\n`;
   if (targetType === 'Multiple Choice') {
-    user += `- Produce exactly ${expectedOptionsCount} options labeled ${optionLabels.join(', ')}. Keep existing non-empty options unless you are making them clearer.\n`;
+    user += `- Multiple Choice: return "options" as an array of strings labeled ${optionLabels.join(', ')} with length ${expectedOptionsCount}. Adjust existing options if they contradict the constraints.\n`;
   } else {
-    user += '- The options array must be empty [] for this question type.\n';
+    user += '- Non-multiple-choice types must keep "options" as an empty array [].\n';
   }
   if (targetType === 'Fill-in-the-blank') {
     user += '- Edit the question text so the unknown value is explicitly shown as one or more blanks (e.g., "___"). Do not leave the question unchanged if it lacks blanks.\n';
-    user += '- Introduce concise definitions or background (for example, define "good numbers") whenever the source text assumes context that the new question requires.\n';
+    user += '- Introduce concise definitions or background whenever the source text assumes context that the new question requires.\n';
     user += '- When converting proof-style prompts, reshape them into concrete fill-in tasks (e.g., ask for a specific value, count, or example) that admit a short factual answer.\n';
     user += '- If the original statement only asserts existence, design a blank that captures a specific witness or numerical property and provide that exact value as the answer.\n';
     user += 'Example (ICL):\n';
@@ -80,9 +81,9 @@ export async function generateProblemFromText(
     user += 'Answer example: question "Solve for x: ___ + 3 = 7." -> answer "4".\n';
     user += '- If there are multiple blanks, return the answer as an ordered JSON array of strings (e.g., ["4", "9"]).\n';
   }
-  user += '- Before replying, verify that every blank has a matching non-empty answer and that the answer satisfies the completed question; if not, adjust the question and answer and re-check.\n';
+  user += '- Answer integrity check. Before finalizing, verify every blank has a matching non-empty answer that truly satisfies the rewritten question; if inconsistency remains, revise both question and answer and re-check.\n';
   user += '- Ensure the answer matches the completed problem statement.\n';
-  user += '- Return a single JSON object with keys question, questionType, options, answer, subfield, academicLevel, difficulty and no extra commentary.\n';
+  user += '- Return format: output a single JSON object with exactly the keys listed in the system message. No trailing commas, comments, or additional text.\n';
 
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
