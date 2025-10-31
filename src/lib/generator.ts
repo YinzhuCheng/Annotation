@@ -103,8 +103,19 @@ export async function generateProblemFromText(
   try {
     obj = JSON.parse(jsonText);
   } catch (error) {
-    console.error('Failed to parse LLM JSON response', error, jsonText);
-    throw error instanceof Error ? error : new Error(String(error));
+    const repaired = jsonText.replace(/(?<!\\)\\(?!["\\\/bfnrtu])/g, '\\\\');
+    if (repaired !== jsonText) {
+      try {
+        obj = JSON.parse(repaired);
+        console.warn('Recovered JSON by escaping invalid backslashes');
+      } catch (innerError) {
+        console.error('Failed to parse repaired LLM JSON response', innerError, repaired);
+        throw innerError instanceof Error ? innerError : new Error(String(innerError));
+      }
+    } else {
+      console.error('Failed to parse LLM JSON response', error, jsonText);
+      throw error instanceof Error ? error : new Error(String(error));
+    }
   }
 
   const allowedQuestionTypes: ProblemRecord['questionType'][] = ['Multiple Choice', 'Fill-in-the-blank', 'Proof'];
