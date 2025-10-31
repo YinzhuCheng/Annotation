@@ -174,10 +174,19 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!ensureAgent('generator')) return;
     setLlmStatusSource('generate');
     setGeneratorPreview('');
-    const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
-    update(patch);
-    setGeneratorPreview(JSON.stringify(patch, null, 2));
-    setLlmStatus('done');
+    try {
+      const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
+      update(patch);
+      setGeneratorPreview(JSON.stringify(patch, null, 2));
+      setLlmStatus('done');
+    } catch (err: any) {
+      const message = err?.message ? String(err.message) : String(err);
+      console.error('Generate with LLM failed:', err);
+      setGeneratorPreview(`Error: ${message}`);
+      setLlmStatus('idle');
+      setLlmStatusSource(null);
+      alert(message);
+    }
   };
 
   const runTranslation = async () => {

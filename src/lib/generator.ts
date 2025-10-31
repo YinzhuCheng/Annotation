@@ -57,42 +57,42 @@ export async function generateProblemFromText(
   user += `- difficulty options: ${difficultyList}\n\n`;
 
   user += 'Instructions:\n';
-  user += '- Rewrite or polish the problem statement so it fully conforms to the target question type while preserving the core idea.\n';
-  user += '- Add concise context or definitions whenever needed so the rewritten problem is self-contained and unambiguous.\n';
-  user += '- Generate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) from your rewritten statement; treat the reference draft above purely as optional hints.\n';
-  user += `- Set "questionType" in the output to "${targetType}" exactly.\n`;
-  user += `- Select subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when no option fits).\n`;
+  user += '1. Begin with a section labeled "Analysis:" where you reason step by step about the source problem, explore relevant properties, and decide how to adapt it to the target question type. Do not skip this analysis.\n';
+  user += '2. Using the insights from your analysis, rewrite the problem so it fully conforms to the target question type while preserving the core idea and making the prompt self-contained.\n';
+  user += '3. Populate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) from your rewritten statement; treat the draft above only as optional hints. Avoid empty strings?if a field seems intrinsically unsuitable, explain why in the analysis before choosing the closest valid value.\n';
+  user += `   - Set "questionType" in the JSON output to "${targetType}" exactly.\n`;
+  user += '   - Select subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when no option fits).\n';
   if (targetType === 'Multiple Choice') {
-    user += `- Multiple Choice: produce "options" as an array of strings labeled ${optionLabels.join(', ')} with length ${expectedOptionsCount}, and ensure "answer" names the single correct choice.\n`;
+    user += `   - Multiple Choice: create ${expectedOptionsCount} options labeled ${optionLabels.join(', ')} and ensure exactly one option is correct and identified in "answer".\n`;
   } else {
-    user += '- Non-multiple-choice question types must set "options" to an empty array [].\n';
+    user += '   - Non-multiple-choice question types must set "options" to an empty array [].\n';
   }
-  if (targetType === 'Fill-in-the-blank') {
-    user += '- Fill-in-the-blank: insert explicit blanks such as "___" and convert proof-style prompts into concrete fill-in requests (e.g., a specific value, count, or example).\n';
-    user += '- If the source only asserts existence, design blanks that capture concrete witnesses or numerical properties and supply those exact values in the answer.\n';
-    user += 'Example transformations:\n';
-    user += 'Original: "Let x + 3 = 7. Solve for x." -> "Solve for x: ___ + 3 = 7."\n';
-    user += 'Original: "Prove there are infinitely many pairwise coprime composite good numbers." -> "A positive integer n is called a good number if {n^2/5} = 3/5. Provide one composite good number whose distinct prime factors multiply to ___."\n';
-    user += '- Provide the answer as the exact value(s) that fill the blank(s); when multiple blanks exist, use an ordered JSON array such as ["4","9"].\n';
-  }
-  if (targetType === 'Proof') {
-    user += '- Proof: phrase the question as a proof request and give a concise outline of a valid proof strategy in the "answer" field.\n';
-  }
-  user += '- Verify internal consistency: the answer must satisfy the rewritten question and every blank or option must align with it.\n';
-  user += '- Return format: output a single JSON object containing exactly the keys required in the system message, with no additional commentary or trailing text.\n';
+  user += '   - Fill-in-the-blank: insert explicit blanks such as "___". When the source only asserts existence, ask for a concrete witness or numerical property, and supply those exact values in the answer (use an ordered JSON array like ["4","9"] if multiple blanks exist).\n';
+  user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
+  user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not append any text after the JSON block.\n';
 
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: user }
   ], agent.config, { temperature: 0.2 }, handlers);
 
-  let obj: any = {};
-  try { obj = JSON.parse(raw); } catch {
-    // best effort: try to extract JSON substring
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) {
-      try { obj = JSON.parse(m[0]); } catch {}
-    }
+  const jsonMarker = raw.indexOf('JSON:');
+  if (jsonMarker === -1) {
+    console.error('LLM response missing JSON section', raw);
+    throw new Error('LLM response missing JSON section');
+  }
+  const jsonText = raw.slice(jsonMarker + 5).trim();
+  if (!jsonText) {
+    console.error('LLM response JSON section empty', raw);
+    throw new Error('LLM response JSON section empty');
+  }
+
+  let obj: any;
+  try {
+    obj = JSON.parse(jsonText);
+  } catch (error) {
+    console.error('Failed to parse LLM JSON response', error, jsonText);
+    throw error instanceof Error ? error : new Error(String(error));
   }
 
   const allowedQuestionTypes: ProblemRecord['questionType'][] = ['Multiple Choice', 'Fill-in-the-blank', 'Proof'];
