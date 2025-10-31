@@ -28,6 +28,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
   const goNext = () => {
     if (!hasNext) return;
+    if (!ensureRequiredBeforeProceed()) return;
     commitCurrent();
     const isLast = currentIndex === store.problems.length - 1;
     if (isLast) {
@@ -226,6 +227,36 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
 
+  const getMissingRequiredFields = (): string[] => {
+    const missing: string[] = [];
+    if (!current.question?.trim()) missing.push(t('problemText'));
+    if (!current.questionType?.trim()) missing.push(t('targetType'));
+    if (!current.answer?.trim()) missing.push(t('answer'));
+    if (selectedSubfields.length === 0) missing.push(t('subfield'));
+    if (!current.source?.trim()) missing.push(t('source'));
+    if (!current.academicLevel?.trim()) missing.push(t('academic'));
+    if (!current.difficulty?.trim()) missing.push(difficultyLabel);
+    if (current.questionType === 'Multiple Choice') {
+      const optionCount = Math.max(2, defaults.optionsCount || (current.options?.length ?? 0) || 0);
+      const options = Array.from({ length: optionCount }, (_, i) => (current.options?.[i] ?? '').trim());
+      if (options.some((opt) => !opt)) missing.push(t('options'));
+    }
+    return missing;
+  };
+
+  const ensureRequiredBeforeProceed = () => {
+    const missing = Array.from(new Set(getMissingRequiredFields()));
+    if (missing.length === 0) return true;
+    const message = t('requiredMissing', { fields: missing.join('?') });
+    return window.confirm(message);
+  };
+
+  const handleSaveCurrent = () => {
+    if (!ensureRequiredBeforeProceed()) return;
+    store.upsertProblem({});
+    setSavedAt(Date.now());
+  };
+
   const addSubfield = (value: string) => {
     const v = value.trim();
     if (!v) return;
@@ -255,12 +286,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   return (
     <div>
-      <div className="row" style={{justifyContent:'space-between'}}>
-        <div className="row" style={{gap:8}}>
+      <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+        <div className="row" style={{gap:8, flexWrap:'wrap'}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
-          <button onClick={() => { store.upsertProblem({}); setSavedAt(Date.now()); }}>{t('saveProblem')}</button>
+          <button onClick={handleSaveCurrent}>{t('saveProblem')}</button>
+          <button className="primary" onClick={generate}>{t('generate')}</button>
         </div>
-        <div className="row" style={{gap:8}}>
+        <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
+          {(llmStatus !== 'idle' && llmStatus !== 'done') && (
+            <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+          )}
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
           <button onClick={goNext}>{t('next')}</button>
           <span className="small">ID: {current.id}</span>
@@ -268,18 +303,20 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         </div>
       </div>
 
+      <div className="small" style={{marginTop:8, color:'var(--text-muted)'}}>{t('requiredMarkNote')}</div>
+
       <hr className="div" />
 
       <div className="grid grid-2">
         <div>
-          <div className="label">{t('problemText')}</div>
+          <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
           <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
           <div className="row" style={{justifyContent:'space-between'}}>
             <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
             <span className="small">{t('latexFixHint')}</span>
           </div>
 
-          <div className="label" style={{marginTop:12}}>{t('targetType')}</div>
+          <div className="label" style={{marginTop:12}}>{t('targetType')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
           <select value={current.questionType} onChange={(e)=> update({ questionType: e.target.value as any })}>
             <option value="Multiple Choice">{t('type_mc')}</option>
             <option value="Fill-in-the-blank">{t('type_fitb')}</option>
@@ -287,51 +324,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           </select>
           <div className="small" style={{marginTop:6}}>{t('type_hint')}</div>
 
-          <div className="row" style={{marginTop:8, alignItems:'center', justifyContent:'space-between'}}>
-            <button className="primary" onClick={generate}>{t('generate')}</button>
-            {(llmStatus !== 'idle' && llmStatus !== 'done') && (
-              <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
-            )}
-          </div>
-
-          <div className="card" style={{marginTop:12, display:'flex', flexDirection:'column', gap:8}}>
-            <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
-              <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
-              <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-                <button type="button" onClick={() => loadTranslationFrom('question')}>{t('translationLoadQuestion')}</button>
-                <button type="button" onClick={() => loadTranslationFrom('answer')}>{t('translationLoadAnswer')}</button>
-                <select value={translationTarget} onChange={(e)=> setTranslationTarget(e.target.value as 'en' | 'zh')}>
-                  <option value="zh">{t('translationTargetZh')}</option>
-                  <option value="en">{t('translationTargetEn')}</option>
-                </select>
-                <button type="button" className="primary" onClick={runTranslation}>{t('translationRun')}</button>
-              </div>
-            </div>
-            {(translationStatus !== 'idle' && translationStatus !== 'done') && (
-              <span className="small">{translationStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
-            )}
-            {translationError && (
-              <span className="small" style={{color:'#f87171'}}>{translationError}</span>
-            )}
-            <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:8}}>
-              <div>
-                <div className="label" style={{marginBottom:4}}>{t('translationInputLabel')}</div>
-                <textarea value={translationInput} onChange={(e)=> setTranslationInput(e.target.value)} rows={8} />
-              </div>
-              <div>
-                <div className="label" style={{marginBottom:4}}>{t('translationOutputLabel')}</div>
-                <textarea value={translationOutput} onChange={(e)=> setTranslationOutput(e.target.value)} rows={8} />
-              </div>
-            </div>
-            <div className="row" style={{justifyContent:'flex-end', gap:8, flexWrap:'wrap'}}>
-              <button type="button" onClick={()=> translationOutput && update({ question: translationOutput })}>{t('translationApplyQuestion')}</button>
-              <button type="button" onClick={()=> translationOutput && update({ answer: translationOutput })}>{t('translationApplyAnswer')}</button>
-            </div>
-          </div>
-
           {current.questionType === 'Multiple Choice' && (
             <div style={{marginTop:12}}>
-              <div className="label">{t('options')}</div>
+              <div className="label">{t('options')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <div className="options-grid">
                 {Array.from({ length: Math.max(2, defaults.optionsCount || current.options.length || 5) }).map((_, idx) => (
                   <input key={idx} value={current.options[idx] || ''} onChange={(e)=>{
@@ -345,7 +340,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           )}
 
           <div style={{marginTop:12}}>
-            <div className="label">{t('answer')}</div>
+            <div className="label">{t('answer')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
             <textarea value={current.answer} onChange={(e)=> update({ answer: e.target.value })} />
             <div className="row" style={{justifyContent:'space-between'}}>
               <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
@@ -367,48 +362,87 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
             </div>
           )}
-          <div className="label">{t('uploadImage')}</div>
-          <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
-            <div className="row" style={{justifyContent:'center', gap:8}}>
-              <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
-                const f = e.target.files?.[0];
-                if (f) onAddOcrImage(f);
-              }} />
-              <input type="file" style={{display:'none'}} ref={folderInputRef} multiple onChange={(e)=>{
-                const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-                if (files[0]) onAddOcrImage(files[0]);
-              }} />
-              {folderInputRef.current && (()=>{ folderInputRef.current.setAttribute('webkitdirectory',''); folderInputRef.current.setAttribute('directory',''); })()}
-              <button onClick={()=> fileInputRef.current?.click()}>{t('browse')}</button>
-              <button onClick={()=> folderInputRef.current?.click()}>{t('folder')}</button>
-              <span className="small">{t('dragDropOrPaste')}</span>
-            </div>
-          </div>
-          {ocrPreviewUrl && (
-            <div style={{marginTop:8}}>
-              <div className="row" style={{justifyContent:'flex-end', marginBottom:6}}>
-                <button onClick={()=> openViewer(ocrPreviewUrl)}>{t('viewLarge')}</button>
+          <div className="card" style={{marginBottom:12, display:'flex', flexDirection:'column', gap:12}}>
+            <div>
+              <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+                <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
+                <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                  <button type="button" onClick={() => loadTranslationFrom('question')}>{t('translationLoadQuestion')}</button>
+                  <button type="button" onClick={() => loadTranslationFrom('answer')}>{t('translationLoadAnswer')}</button>
+                  <select value={translationTarget} onChange={(e)=> setTranslationTarget(e.target.value as 'en' | 'zh')}>
+                    <option value="zh">{t('translationTargetZh')}</option>
+                    <option value="en">{t('translationTargetEn')}</option>
+                  </select>
+                  <button type="button" className="primary" onClick={runTranslation}>{t('translationRun')}</button>
+                </div>
               </div>
-              <img className="preview" src={ocrPreviewUrl} />
+              {(translationStatus !== 'idle' && translationStatus !== 'done') && (
+                <span className="small">{translationStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+              )}
+              {translationError && (
+                <span className="small" style={{color:'#f87171'}}>{translationError}</span>
+              )}
+              <div className="grid" style={{gridTemplateColumns:'1fr 1fr', gap:8, marginTop:8}}>
+                <div>
+                  <div className="label" style={{marginBottom:4}}>{t('translationInputLabel')}</div>
+                  <textarea value={translationInput} onChange={(e)=> setTranslationInput(e.target.value)} rows={6} />
+                </div>
+                <div>
+                  <div className="label" style={{marginBottom:4}}>{t('translationOutputLabel')}</div>
+                  <textarea value={translationOutput} onChange={(e)=> setTranslationOutput(e.target.value)} rows={6} />
+                </div>
+              </div>
+              <div className="row" style={{justifyContent:'flex-end', gap:8, flexWrap:'wrap'}}>
+                <button type="button" onClick={()=> translationOutput && update({ question: translationOutput })}>{t('translationApplyQuestion')}</button>
+                <button type="button" onClick={()=> translationOutput && update({ answer: translationOutput })}>{t('translationApplyAnswer')}</button>
+              </div>
             </div>
-          )}
+            <hr className="div" style={{margin:'0'}} />
+            <div>
+              <div className="label">{t('uploadImage')}</div>
+              <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
+                <div className="row" style={{justifyContent:'center', gap:8}}>
+                  <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
+                    const f = e.target.files?.[0];
+                    if (f) onAddOcrImage(f);
+                  }} />
+                  <input type="file" style={{display:'none'}} ref={folderInputRef} multiple onChange={(e)=>{
+                    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+                    if (files[0]) onAddOcrImage(files[0]);
+                  }} />
+                  {folderInputRef.current && (()=>{ folderInputRef.current.setAttribute('webkitdirectory',''); folderInputRef.current.setAttribute('directory',''); })()}
+                  <button onClick={()=> fileInputRef.current?.click()}>{t('browse')}</button>
+                  <button onClick={()=> folderInputRef.current?.click()}>{t('folder')}</button>
+                  <span className="small">{t('dragDropOrPaste')}</span>
+                </div>
+              </div>
+              {ocrPreviewUrl && (
+                <div style={{marginTop:8}}>
+                  <div className="row" style={{justifyContent:'flex-end', marginBottom:6}}>
+                    <button onClick={()=> openViewer(ocrPreviewUrl)}>{t('viewLarge')}</button>
+                  </div>
+                  <img className="preview" src={ocrPreviewUrl} />
+                </div>
+              )}
 
-          <div className="row" style={{marginTop:8, gap:8}}>
-            <button onClick={runOCR}>{t('ocrExtract')}</button>
-            <button onClick={applyOcrText}>{t('confirmText')}</button>
+              <div className="row" style={{marginTop:8, gap:8}}>
+                <button onClick={runOCR}>{t('ocrExtract')}</button>
+                <button onClick={applyOcrText}>{t('confirmText')}</button>
+              </div>
+              {ocrText && (
+                <textarea style={{marginTop:8}} value={ocrText} onChange={(e)=> setOcrText(e.target.value)} />
+              )}
+            </div>
           </div>
-          {ocrText && (
-            <textarea style={{marginTop:8}} value={ocrText} onChange={(e)=> setOcrText(e.target.value)} />
-          )}
 
           <div className="card" style={{marginTop:12}}>
-            <div className="label">{t('subfield')}</div>
+            <div className="label">{t('subfield')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
               <select
                 onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }}
                 defaultValue=""
               >
-                <option value="" disabled>—</option>
+                <option value="" disabled>?</option>
                 {subfieldOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                 <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
               </select>
@@ -423,7 +457,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   {selectedSubfields.map(s => (
                     <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
                       {s}
-                      <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>✕</button>
+                      <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>?</button>
                     </span>
                   ))}
                 </div>
@@ -438,7 +472,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           </div>
 
           <div style={{marginTop:12}}>
-            <div className="label">{t('source')}</div>
+            <div className="label">{t('source')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
               <select
                 value={sourceSelectValue}
@@ -467,7 +501,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
           <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginTop:12}}>
             <div>
-              <div className="label">{t('academic')}</div>
+              <div className="label">{t('academic')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <select value={current.academicLevel} onChange={(e)=> update({ academicLevel: e.target.value })}>
                 {academicSelectOptions.map((option) => (
                   <option key={option} value={option}>{option}</option>
@@ -475,7 +509,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               </select>
             </div>
             <div>
-              <div className="label">{difficultyLabel}</div>
+              <div className="label">{difficultyLabel}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
                 {difficultySelectOptions.map((option) => (
                   <option key={option} value={option}>{option}</option>

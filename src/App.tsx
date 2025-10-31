@@ -106,6 +106,10 @@ export default function App() {
         </div>
       </div>
 
+      <div style={{ marginTop: 24, marginBottom: 24, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+        ?????????????????chengyinzhu@bimsa.cn
+      </div>
+
       {/* Help moved to standalone page at /help.html */}
     </>
   );
