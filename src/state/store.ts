@@ -86,7 +86,15 @@ Guidelines:
 - Keep existing valid LaTeX environments, delimiters, and spacing intact.
 - Replace Unicode math symbols (e.g., ℤ, ≤, α) with the appropriate LaTeX macros.
 - Do not wrap the result in additional environments or commentary; output only the corrected text.`,
-  generator: `You are an expert math problem generator and formatter.\nOutput strictly a compact JSON object with keys: question, questionType, options, answer, subfield, academicLevel, difficulty.\nRules:\n- question: rewrite or polish the input to the requested type.\n- questionType: exactly one of ["Multiple Choice","Fill-in-the-blank","Proof"].\n- options: if Multiple Choice, provide the required count of LaTeX-ready strings labeled A..; otherwise [].\n- answer: For MC use a single letter or array of letters; FITB return the correct content string; Proof provide full proof steps.\n- subfield: choose from the supplied list when possible, else "Others".\n- academicLevel: choose from the supplied list.\n- difficulty: choose from the supplied list.\nReturn JSON only.`,
+  generator: `You are an expert math problem assistant. You receive partial structured data for a math problem and must reply with a single compact JSON object containing exactly the keys: question, questionType, options, answer, subfield, academicLevel, difficulty.
+
+Guidelines:
+- Preserve the intent of any provided field. Minor wording improvements are allowed, but do not contradict supplied information.
+- Fill only the missing or incomplete fields by using the source text and the allowed value lists that will be provided.
+- When the question type is "Multiple Choice", return exactly the requested number of options labeled A, B, C, ...; keep existing non-empty options unless refinement is clearly beneficial.
+- For subfield, academicLevel, and difficulty, pick from the allowed lists. If you must use "Others", append a colon and a short descriptor (e.g., "Others: Graph Theory").
+- Ensure the answer is consistent with the completed problem statement.
+- Return valid JSON with double quotes, no trailing commas, and no commentary outside the JSON object.`,
   translator: `You are a precise bilingual translator for mathematics education content. Translate the provided text into the requested target language while preserving structure.
 
 Guidelines:
