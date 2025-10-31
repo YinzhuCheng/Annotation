@@ -70,6 +70,8 @@ export async function generateProblemFromText(
     user += 'Example (ICL):\n';
     user += 'Original: "Let x + 3 = 7. Solve for x."\n';
     user += 'Output question: "Solve for x: ___ + 3 = 7."\n';
+    user += '- Return the answer as the concrete value that fills the blank (e.g., "4"), not a narrative sentence.\n';
+    user += 'Answer example: question "Solve for x: ___ + 3 = 7." -> answer "4".\n';
   }
   user += '- Ensure the answer matches the completed problem statement.\n';
   user += '- Return a single JSON object with keys question, questionType, options, answer, subfield, academicLevel, difficulty and no extra commentary.\n';

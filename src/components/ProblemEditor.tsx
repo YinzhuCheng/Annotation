@@ -217,6 +217,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const academicOptions = defaults.academicLevels;
   const difficultyOptions = defaults.difficultyOptions;
   const difficultyLabel = defaults.difficultyPrompt?.trim() || t('difficulty');
+  const difficultyLabelDisplay = difficultyLabel === 'Difficulty (1=easy, 3=hard)' ? t('difficulty') : difficultyLabel;
   const sourceSelectValue = sourceOptions.includes(current.source) ? current.source : CUSTOM_OPTION;
   const academicSelectOptions = academicOptions.includes(current.academicLevel) || !current.academicLevel
     ? academicOptions
@@ -235,7 +236,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (selectedSubfields.length === 0) missing.push(t('subfield'));
     if (!current.source?.trim()) missing.push(t('source'));
     if (!current.academicLevel?.trim()) missing.push(t('academic'));
-    if (!current.difficulty?.trim()) missing.push(difficultyLabel);
+    if (!current.difficulty?.trim()) missing.push(difficultyLabelDisplay);
     if (current.questionType === 'Multiple Choice') {
       const optionCount = Math.max(2, defaults.optionsCount || (current.options?.length ?? 0) || 0);
       const options = Array.from({ length: optionCount }, (_, i) => (current.options?.[i] ?? '').trim());
@@ -421,7 +422,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </select>
               </div>
               <div>
-                <div className="label">{difficultyLabel}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+              <div className="label">{difficultyLabelDisplay}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
                 <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
                   {difficultySelectOptions.map((option) => (
                     <option key={option} value={option}>{option}</option>
@@ -457,6 +458,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                 )}
               </div>
+              <div className="small" style={{marginTop:4, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
             </div>
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
