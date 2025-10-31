@@ -32,10 +32,10 @@ export async function generateProblemFromText(
   const academicList = defaults.academicLevels.join('; ') || 'K12; Professional';
   const difficultyList = defaults.difficultyOptions.join('; ') || '1; 2; 3';
 
-  const systemPrompt = agent.prompt?.trim() || `You are an expert math problem assistant. You receive partial structured data for a math problem and must reply with a single compact JSON object containing exactly the keys: question, questionType, options, answer, subfield, academicLevel, difficulty.`;
+  const systemPrompt = agent.prompt?.trim() || `You are a mathematics problem polishing assistant. Given a raw prompt and a target question type, rewrite the problem text so it fully conforms to that type, then construct all associated structured fields. Reply with a JSON object containing exactly the keys: question, questionType, options, answer, subfield, academicLevel, difficulty.`;
 
   let user = `Original source text (blank means none):\n${sanitizedInput}\n\n`;
-  user += 'Current record snapshot (blank means missing):\n';
+  user += 'Current draft for reference (existing values may be overwritten):\n';
   user += `- questionType: ${targetType}\n`;
   user += `- question: ${existingQuestion || '<missing>'}\n`;
   if (targetType === 'Multiple Choice') {
@@ -57,33 +57,29 @@ export async function generateProblemFromText(
   user += `- difficulty options: ${difficultyList}\n\n`;
 
   user += 'Instructions:\n';
-  user += '- Honor constraints first. Treat the "Current record snapshot" as authoritative for populated fields unless it explicitly flags a rewrite (e.g., "<force rewrite>" or a directive in the constraints list).\n';
-  user += '- Fill every "<missing>" or blank field using the source text plus your own reasoning. Choose metadata only from the allowed lists (prepend "Others: ..." if nothing fits).\n';
-  user += '- Embrace adaptive rewriting. You may restructure, shorten, expand, translate, or restate the problem to satisfy constraints and the target question type; aim for natural, fluent prose and accurate mathematics.\n';
-  user += '- Make the resulting question self-contained by defining or restating any concept that would otherwise be ambiguous.\n';
-  user += `- Keep questionType as "${targetType}".\n`;
+  user += '- Rewrite or polish the problem statement so it fully conforms to the target question type while preserving the core idea.\n';
+  user += '- Add concise context or definitions whenever needed so the rewritten problem is self-contained and unambiguous.\n';
+  user += '- Generate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) from your rewritten statement; treat the reference draft above purely as optional hints.\n';
+  user += `- Set "questionType" in the output to "${targetType}" exactly.\n`;
+  user += `- Select subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when no option fits).\n`;
   if (targetType === 'Multiple Choice') {
-    user += `- Multiple Choice: return "options" as an array of strings labeled ${optionLabels.join(', ')} with length ${expectedOptionsCount}. Adjust existing options if they contradict the constraints.\n`;
+    user += `- Multiple Choice: produce "options" as an array of strings labeled ${optionLabels.join(', ')} with length ${expectedOptionsCount}, and ensure "answer" names the single correct choice.\n`;
   } else {
-    user += '- Non-multiple-choice types must keep "options" as an empty array [].\n';
+    user += '- Non-multiple-choice question types must set "options" to an empty array [].\n';
   }
   if (targetType === 'Fill-in-the-blank') {
-    user += '- Edit the question text so the unknown value is explicitly shown as one or more blanks (e.g., "___"). Do not leave the question unchanged if it lacks blanks.\n';
-    user += '- Introduce concise definitions or background whenever the source text assumes context that the new question requires.\n';
-    user += '- When converting proof-style prompts, reshape them into concrete fill-in tasks (e.g., ask for a specific value, count, or example) that admit a short factual answer.\n';
-    user += '- If the original statement only asserts existence, design a blank that captures a specific witness or numerical property and provide that exact value as the answer.\n';
-    user += 'Example (ICL):\n';
-    user += 'Original: "Let x + 3 = 7. Solve for x."\n';
-    user += 'Output question: "Solve for x: ___ + 3 = 7."\n';
-    user += 'Original: "Prove there are infinitely many pairwise coprime composite good numbers." (no definition provided)\n';
-    user += 'Output question: "A positive integer n is called a good number if {n^2/5} = 3/5. Give one composite good number whose distinct prime factors multiply to ___".\n';
-    user += '- Return the answer as the concrete value that fills the blank (e.g., "4"), not a narrative sentence.\n';
-    user += 'Answer example: question "Solve for x: ___ + 3 = 7." -> answer "4".\n';
-    user += '- If there are multiple blanks, return the answer as an ordered JSON array of strings (e.g., ["4", "9"]).\n';
+    user += '- Fill-in-the-blank: insert explicit blanks such as "___" and convert proof-style prompts into concrete fill-in requests (e.g., a specific value, count, or example).\n';
+    user += '- If the source only asserts existence, design blanks that capture concrete witnesses or numerical properties and supply those exact values in the answer.\n';
+    user += 'Example transformations:\n';
+    user += 'Original: "Let x + 3 = 7. Solve for x." -> "Solve for x: ___ + 3 = 7."\n';
+    user += 'Original: "Prove there are infinitely many pairwise coprime composite good numbers." -> "A positive integer n is called a good number if {n^2/5} = 3/5. Provide one composite good number whose distinct prime factors multiply to ___."\n';
+    user += '- Provide the answer as the exact value(s) that fill the blank(s); when multiple blanks exist, use an ordered JSON array such as ["4","9"].\n';
   }
-  user += '- Answer integrity check. Before finalizing, verify every blank has a matching non-empty answer that truly satisfies the rewritten question; if inconsistency remains, revise both question and answer and re-check.\n';
-  user += '- Ensure the answer matches the completed problem statement.\n';
-  user += '- Return format: output a single JSON object with exactly the keys listed in the system message. No trailing commas, comments, or additional text.\n';
+  if (targetType === 'Proof') {
+    user += '- Proof: phrase the question as a proof request and give a concise outline of a valid proof strategy in the "answer" field.\n';
+  }
+  user += '- Verify internal consistency: the answer must satisfy the rewritten question and every blank or option must align with it.\n';
+  user += '- Return format: output a single JSON object containing exactly the keys required in the system message, with no additional commentary or trailing text.\n';
 
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
