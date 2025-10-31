@@ -29,7 +29,6 @@ const SUPPORTED_PROVIDERS = new Set<LLMConfigState['provider']>(['openai', 'gemi
 
 export const DEFAULT_SUBFIELD_OPTIONS: string[] = [
   'Point-Set Topology',
-  'Algebraic Topology',
   'Homotopy Theory',
   'Homology Theory',
   'Knot Theory',

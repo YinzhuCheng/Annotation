@@ -179,6 +179,8 @@ export function ImageComposer() {
       const colLabelLineHeight = 28;
       const minAreaRatioVsSingle = 0.6; // ensure options are not too small
       const drawWidthFull = targetWidth - padding * 2;
+      const rowLabelColor = '#2563eb';
+      const defaultTextColor = '#000000';
 
       const makeLabel = (block: Block, optionIndex: number): { text: string; wrapParen: boolean } => {
         if (block.type === 'options') {
@@ -283,7 +285,7 @@ export function ImageComposer() {
       ctx.fillRect(0,0,canvas.width, canvas.height);
 
       // draw
-      ctx.fillStyle = '#000000';
+      ctx.fillStyle = defaultTextColor;
       ctx.font = `${rowLabelFontSize}px sans-serif`;
       let y = padding;
       const separatorColor = '#3b82f6'; // blue separators
@@ -301,9 +303,10 @@ export function ImageComposer() {
           const scale = drawWidth / img.width;
           const h = img.height * scale;
           // Row label: <Image N>
-          ctx.fillStyle = '#000000';
+          ctx.fillStyle = rowLabelColor;
           ctx.font = `${rowLabelFontSize}px sans-serif`;
           ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
+          ctx.fillStyle = defaultTextColor;
           // Draw image below the row label line
           ctx.drawImage(img, padding, y + rowLabelLineHeight, drawWidth, h);
           y += h + rowLabelLineHeight + gap;
@@ -322,10 +325,11 @@ export function ImageComposer() {
             let rowH = 0;
             // Draw row label only once for the first row in this options block
             if (!drawnRowLabelForThisBlock) {
-              ctx.fillStyle = '#000000';
+              ctx.fillStyle = rowLabelColor;
               ctx.font = `${rowLabelFontSize}px sans-serif`;
               ctx.fillText(`<Image ${rowIndex}>`, padding, y + Math.round(rowLabelFontSize * 0.8));
               drawnRowLabelForThisBlock = true;
+              ctx.fillStyle = defaultTextColor;
             }
 
             if (g <= 1) {
@@ -337,7 +341,7 @@ export function ImageComposer() {
               const x = padding;
               // label under the row label
               const { text: label, wrapParen } = makeLabel(b, optIdx);
-              ctx.fillStyle = '#000000';
+              ctx.fillStyle = defaultTextColor;
               ctx.font = `${colLabelFontSize}px sans-serif`;
               ctx.fillText(wrapParen ? `(${label})` : `${label}`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
               ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, drawWidth, h);
@@ -354,7 +358,7 @@ export function ImageComposer() {
                 const h = img.height * scale;
                 const x = padding + i * (colWidth + optionGap);
                 const { text: label, wrapParen } = makeLabel(b, optIdx + i);
-                ctx.fillStyle = '#000000';
+                ctx.fillStyle = defaultTextColor;
                 ctx.font = `${colLabelFontSize}px sans-serif`;
                 ctx.fillText(wrapParen ? `(${label})` : `${label}`, x, y + rowLabelLineHeight + Math.round(colLabelFontSize * 0.8));
                 ctx.drawImage(img, x, y + rowLabelLineHeight + colLabelLineHeight, colWidth, h);
