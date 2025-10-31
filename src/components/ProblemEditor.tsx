@@ -367,10 +367,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 )}
                 {selectedSubfields.length > 0 && (
                   <div className="row" style={{gap:6, flexWrap:'wrap'}}>
-                    {selectedSubfields.map(s => (
+                    {selectedSubfields.map((s) => (
                       <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
                         {s}
-                        <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}}>?</button>
+                        <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}} aria-label={t('defaultsRemoveItem', { item: s })}>?</button>
                       </span>
                     ))}
                   </div>
@@ -530,26 +530,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
           </div>
 
-          <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginTop:12}}>
-            <div>
-              <div className="label">{t('academic')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-              <select value={current.academicLevel} onChange={(e)=> update({ academicLevel: e.target.value })}>
-                {academicSelectOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div className="label">{difficultyLabel}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-              <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
-                {difficultySelectOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </div>
-            <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end'}}>
-              <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
-            </div>
+          <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end', marginTop:12}}>
+            <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
           </div>
         </div>
       </div>

@@ -65,6 +65,12 @@ export async function generateProblemFromText(
   } else {
     user += '- The options array must be empty [] for this question type.\n';
   }
+  if (targetType === 'Fill-in-the-blank') {
+    user += '- Edit the question text so the unknown value is explicitly shown as one or more blanks (e.g., "___"). Do not leave the question unchanged if it lacks blanks.\n';
+    user += 'Example (ICL):\n';
+    user += 'Original: "Let x + 3 = 7. Solve for x."\n';
+    user += 'Output question: "Solve for x: ___ + 3 = 7."\n';
+  }
   user += '- Ensure the answer matches the completed problem statement.\n';
   user += '- Return a single JSON object with keys question, questionType, options, answer, subfield, academicLevel, difficulty and no extra commentary.\n';
 
