@@ -1,4 +1,4 @@
-import { LLMConfigState } from '../state/store';
+import { LLMConfigState, LLMAgentSettings } from '../state/store';
 
 type ImageUrlContent = { type: 'image_url'; image_url: { url: string } };
 type TextContent = { type: 'text'; text: string };
@@ -72,8 +72,12 @@ export async function chat(messages: ChatMessage[], llm: LLMConfigState, extra?:
   return chatStream(messages, llm, extra);
 }
 
-export async function latexCorrection(input: string, llm: LLMConfigState, handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }): Promise<string> {
-  const system = 'You are a LaTeX normalizer. Convert nonstandard math symbols into valid LaTeX macros with minimal changes. Return only the corrected text.';
+export async function latexCorrection(
+  input: string,
+  agent: LLMAgentSettings,
+  handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }
+): Promise<string> {
+  const system = agent.prompt?.trim() || 'You are a LaTeX normalizer. Convert nonstandard math symbols into valid LaTeX macros with minimal changes. Return only the corrected text.';
 
   const examples: ChatMessage[] = [
     { role: 'user', content: 'x≤y, α→β, and ∑_i^n f(i)' },
@@ -86,7 +90,7 @@ export async function latexCorrection(input: string, llm: LLMConfigState, handle
     { role: 'system', content: system },
     ...examples,
     { role: 'user', content: input }
-  ], llm, { temperature: 0 }, handlers);
+  ], agent.config, { temperature: 0 }, handlers);
 
   return out.trim();
 }
@@ -100,9 +104,13 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-export async function ocrWithLLM(imageBlob: Blob, llm: LLMConfigState, handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }): Promise<string> {
+export async function ocrWithLLM(
+  imageBlob: Blob,
+  agent: LLMAgentSettings,
+  handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }
+): Promise<string> {
   const dataUrl = await blobToDataUrl(imageBlob);
-  const system = 'You are an OCR engine. Transcribe all readable text from the image into plain UTF-8 text. Preserve math expressions as text (no LaTeX unless present), keep line breaks where meaningful, and do not add commentary.';
+  const system = agent.prompt?.trim() || 'You are an OCR engine. Transcribe all readable text from the image into plain UTF-8 text. Preserve math expressions as text (no LaTeX unless present), keep line breaks where meaningful, and do not add commentary.';
   const out = await chatStream([
     { role: 'system', content: system },
     {
@@ -112,6 +120,6 @@ export async function ocrWithLLM(imageBlob: Blob, llm: LLMConfigState, handlers?
         { type: 'image_url', image_url: { url: dataUrl } }
       ]
     }
-  ], llm, { temperature: 0 }, handlers);
+  ], agent.config, { temperature: 0 }, handlers);
   return out.trim();
 }

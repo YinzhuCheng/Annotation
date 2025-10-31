@@ -1,26 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAppStore, ProblemRecord } from '../state/store';
+import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM } from '../lib/llmAdapter';
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText } from '../lib/generator';
 
-const SUBFIELDS = [
-  'Others',
-  'Point-Set Topology','Algebraic Topology','Homotopy Theory','Homology Theory','Knot Theory','Low-Dimensional Topology','Geometric Topology','Differential Topology','Foliation Theory','Degree Theory'
-];
-
-const SOURCES = [
-  'Others',
-  'MATH-Vision Dataset','Original Question','Math Kangaroo Contest','Caribou Contests','Lecture Notes on Basic Topology: You Cheng Ye','Armstrong Topology','Hatcher AT','Munkres Topology','SimplicialTopology','3-Manifold Topology','Introduction to 3-Manifolds'
-];
-
 export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
   const store = useAppStore();
   const defaults = useAppStore((s)=> s.defaults);
-  const llm = useAppStore((s)=> s.llm);
+  const agents = useAppStore((s)=> s.llmAgents);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
   const currentIndex = useMemo(() => store.problems.findIndex(p => p.id === store.currentId), [store.problems, store.currentId]);
@@ -57,6 +47,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [dots, setDots] = useState(1);
+  const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
+    ocr: t('agentOcr'),
+    latex: t('agentLatex'),
+    generator: t('agentGenerator')
+  }), [t]);
+  const CUSTOM_OPTION = '__custom__';
 
   useEffect(() => {
     if (!current) return;
@@ -124,8 +120,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       alert('Please upload an image for OCR (not the problem image).');
       return;
     }
-    if (!ensureLLM()) return;
-    const text = await ocrWithLLM(ocrImage, llm, { onStatus: (s)=> setLlmStatus(s) });
+    if (!ensureAgent('ocr')) return;
+    const text = await ocrWithLLM(ocrImage, agents.ocr, { onStatus: (s)=> setLlmStatus(s) });
     setOcrText(text);
     setLlmStatus('done');
   };
@@ -136,12 +132,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const openViewer = (src: string) => openViewerWindow(src, { title: t('viewLarge'), back: t('back') });
-
-  const ensureLLM = (): boolean => {
-    if (!llm.apiKey?.trim() || !llm.model?.trim() || !llm.baseUrl?.trim()) {
-      alert(`${t('llmMissingTitle')}: ${t('llmMissingBody')}`);
-      // Scroll to config area
-      document.querySelector('.label')?.scrollIntoView({ behavior: 'smooth' });
+  const ensureAgent = (agentId: AgentId): boolean => {
+    const cfg = agents[agentId]?.config;
+    if (!cfg?.apiKey?.trim() || !cfg?.model?.trim() || !cfg?.baseUrl?.trim()) {
+      alert(`${t('llmMissingTitle')}: ${t('llmAgentMissingBody', { agent: agentDisplay[agentId] })}`);
+      const anchor = document.querySelector('[data-llm-config-section="true"]') || document.querySelector('.label');
+      anchor?.scrollIntoView({ behavior: 'smooth' });
       return false;
     }
     return true;
@@ -150,8 +146,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const fixLatex = async (field: 'question' | 'answer') => {
     const text = (current as any)[field] as string;
     if (!text?.trim()) return;
-    if (!ensureLLM()) return;
-    const corrected = await latexCorrection(text, llm, { onStatus: (s)=> setLlmStatus(s) });
+    if (!ensureAgent('latex')) return;
+    const corrected = await latexCorrection(text, agents.latex, { onStatus: (s)=> setLlmStatus(s) });
     update({ [field]: corrected } as any);
     setLlmStatus('done');
   };
@@ -159,8 +155,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const generate = async () => {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
-    if (!ensureLLM()) return;
-    const patch = await generateProblemFromText(input, current.questionType, llm, { onStatus: (s)=> setLlmStatus(s) });
+    if (!ensureAgent('generator')) return;
+    const patch = await generateProblemFromText(input, current.questionType, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
     update(patch);
     setLlmStatus('done');
   };
@@ -180,6 +176,18 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   // ----- Subfield helpers -----
   const selectedSubfields = useMemo(() => (current.subfield ? current.subfield.split(';').filter(Boolean) : []), [current.subfield]);
+  const subfieldOptions = defaults.subfieldOptions;
+  const sourceOptions = defaults.sourceOptions;
+  const academicOptions = defaults.academicLevels;
+  const difficultyOptions = defaults.difficultyOptions;
+  const difficultyLabel = defaults.difficultyPrompt?.trim() || t('difficulty');
+  const sourceSelectValue = sourceOptions.includes(current.source) ? current.source : CUSTOM_OPTION;
+  const academicSelectOptions = academicOptions.includes(current.academicLevel) || !current.academicLevel
+    ? academicOptions
+    : [...academicOptions, current.academicLevel];
+  const difficultySelectOptions = difficultyOptions.includes(current.difficulty) || !current.difficulty
+    ? difficultyOptions
+    : [...difficultyOptions, current.difficulty];
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
 
@@ -196,7 +204,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
   const onSelectSubfield = (v: string) => {
     if (!v) return;
-    if (v === 'Others') {
+    if (v === CUSTOM_OPTION) {
       setShowCustomSubfield(true);
       setTimeout(() => customSubfieldInputRef.current?.focus(), 0);
       return;
@@ -326,9 +334,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           <div className="card" style={{marginTop:12}}>
             <div className="label">{t('subfield')}</div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
-              <select onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }} defaultValue="">
+              <select
+                onChange={(e)=>{ onSelectSubfield(e.target.value); (e.target as HTMLSelectElement).value=''; }}
+                defaultValue=""
+              >
                 <option value="" disabled>—</option>
-                {SUBFIELDS.map(s => <option key={s} value={s}>{s}</option>)}
+                {subfieldOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
               </select>
               {showCustomSubfield && (
                 <div className="row" style={{gap:8}}>
@@ -359,10 +371,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div className="label">{t('source')}</div>
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
               <select
-                value={SOURCES.includes(current.source) ? current.source : ''}
+                value={sourceSelectValue}
                 onChange={(e)=>{
                   const v = e.target.value;
-                  if (v === 'Others') {
+                  if (v === CUSTOM_OPTION) {
                     update({ source: '' });
                     setTimeout(()=> customSourceInputRef.current?.focus(), 0);
                   } else {
@@ -370,7 +382,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   }
                 }}
               >
-                {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                <option value={CUSTOM_OPTION}>{t('subfield_others')}</option>
               </select>
               <input
                 ref={customSourceInputRef}
@@ -385,17 +398,18 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           <div className="grid" style={{gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginTop:12}}>
             <div>
               <div className="label">{t('academic')}</div>
-              <select value={current.academicLevel} onChange={(e)=> update({ academicLevel: e.target.value as any })}>
-                <option value="K12">{t('k12')}</option>
-                <option value="Professional">{t('professional')}</option>
+              <select value={current.academicLevel} onChange={(e)=> update({ academicLevel: e.target.value })}>
+                {academicSelectOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
               </select>
             </div>
             <div>
-              <div className="label">{t('difficulty')}</div>
-              <select value={current.difficulty} onChange={(e)=> update({ difficulty: Number(e.target.value) as any })}>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
+              <div className="label">{difficultyLabel}</div>
+              <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
+                {difficultySelectOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
               </select>
             </div>
             <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end'}}>
