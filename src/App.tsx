@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Header } from './components/Header';
-import { HelpModal } from './components/HelpModal';
-import { ModeSwitch } from './components/ModeSwitch';
+// import { ModeSwitch } from './components/ModeSwitch';
 import { LLMConfig } from './components/LLMConfig';
 import { ProblemEditor } from './components/ProblemEditor';
 import { ImportExport } from './components/ImportExport';
 import { ImageComposer } from './components/ImageComposer';
 import { useAppStore } from './state/store';
 import { estimateStorage } from './lib/storage';
+import { DefaultsPage } from './components/DefaultsPage';
+import { ClearBankPage } from './components/ClearBankPage';
+
+type Page = 'main' | 'defaults' | 'clear';
 
 export default function App() {
   const { t, i18n } = useTranslation();
-  const [showHelp, setShowHelp] = useState(false);
   const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
   const { mode } = useAppStore();
+  const [page, setPage] = useState<Page>('main');
 
   useEffect(() => {
     estimateStorage().then(setStorageInfo).catch(() => setStorageInfo(null));
@@ -26,12 +29,48 @@ export default function App() {
     localStorage.setItem('lang', next);
   };
 
+  if (page === 'defaults') {
+    return (
+      <>
+        <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
+        <div className="container">
+          <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
+            <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+              <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+              {t('title')}
+            </h2>
+          </div>
+          <DefaultsPage onBack={() => setPage('main')} />
+        </div>
+      </>
+    );
+  }
+  if (page === 'clear') {
+    return (
+      <>
+        <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
+        <div className="container">
+          <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
+            <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+              <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+              {t('title')}
+            </h2>
+          </div>
+          <ClearBankPage onBack={() => setPage('main')} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
-      <Header onHelp={() => setShowHelp(true)} onToggleLang={onToggleLang} />
+      <Header onHelp={() => { window.location.href = '/help.html'; }} onToggleLang={onToggleLang} />
       <div className="container">
         <div className="row" style={{justifyContent:'space-between', marginBottom: 8}}>
-          <h2>{t('title')}</h2>
+          <h2 style={{display:'flex', alignItems:'center', gap:8}}>
+            <img src="/logo.svg" alt="Logo" style={{height:32, width:32, borderRadius:6}} />
+            {t('title')}
+          </h2>
           <div className="row small">
             <span>{t('storage')}:</span>
             {storageInfo ? (
@@ -40,27 +79,26 @@ export default function App() {
                 <span className="badge">{t('quota')}: {(storageInfo.quota / (1024*1024)).toFixed(0)} MB</span>
               </>
             ) : (
-              <span className="badge">N/A</span>
+              <span className="badge">{t('notAvailable')}</span>
             )}
           </div>
         </div>
 
-        <div className="grid grid-2">
-          <div className="card">
-            <ModeSwitch />
-            {mode === 'agent' && (
-              <div className="badge" style={{display:'block', marginTop: 12}}>{t('agentBanner')}</div>
-            )}
-            <LLMConfig />
+        <div className="card">
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+            <div className="label">{t('settingsBlock')}</div>
+            <div className="row" style={{gap:8}}>
+              <button onClick={()=> setPage('defaults')}>{t('editDefaults')}</button>
+            </div>
           </div>
-
-          <div className="card">
-            <ImportExport />
-          </div>
+          <LLMConfig />
+          <hr className="div" />
+          <ImportExport />
         </div>
 
-        <div className="card" style={{marginTop: 16}}>
-          <ProblemEditor />
+        <div className="card" style={{marginTop:16}}>
+          <div className="label">{t('problemsBlock')}</div>
+          <ProblemEditor onOpenClear={()=> setPage('clear')} />
         </div>
 
         <div className="card" style={{marginTop: 16}}>
@@ -68,7 +106,7 @@ export default function App() {
         </div>
       </div>
 
-      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {/* Help moved to standalone page at /help.html */}
     </>
   );
 }
