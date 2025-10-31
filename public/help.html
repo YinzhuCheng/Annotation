@@ -37,20 +37,48 @@
         <div class="card" style="margin-top:12px">
           <h4 style="margin-top:0">Workflow Overview</h4>
           <ul>
-            <li>Open <strong>LLM Configuration</strong> to set API keys, base URLs, and models for every agent.</li>
-            <li>Import, paste, or type problems; run OCR on screenshots to capture the source text.</li>
-            <li>Use the translation assistant whenever you need English-to-Chinese or Chinese-to-English output.</li>
-            <li>Generate or polish questions, then fill in subfields, difficulty, and other metadata.</li>
-            <li>Save your progress and export datasets or composed images when finished.</li>
+            <li>Start in <strong>LLM Configuration</strong> and enter provider, base URL, model, and API key for every agent. The “Overall settings” section applies the same credentials to all four agents at once.</li>
+            <li>Capture raw material by importing spreadsheets, pasting text, or uploading screenshots for OCR. You can mix-and-match these approaches for a single problem.</li>
+            <li>Switch to the problem editor to refine wording, pick subfields, and record metadata such as academic level and difficulty.</li>
+            <li>Use the LLM assist tools to rephrase the question for the chosen type, translate content, or normalise LaTeX. Review the generated draft before saving.</li>
+            <li>When a batch is complete, export structured data (JSON/XLSX) and any composed images to archive your work.</li>
           </ul>
         </div>
         <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">LLM Agents</h4>
+          <h4 style="margin-top:0">Problem Editor Quick Reference</h4>
           <ul>
-            <li><strong>OCR Agent:</strong> Extracts text from uploaded images with a vision-capable model.</li>
-            <li><strong>Translation Agent:</strong> Converts questions or answers between English and Chinese while preserving notation.</li>
-            <li><strong>LaTeX Correction Agent:</strong> Normalizes mathematical expressions into consistent LaTeX.</li>
-            <li><strong>Problem Generation Agent:</strong> Crafts structured problems, answers, and metadata from prompts.</li>
+            <li><strong>Required fields</strong> are marked with an asterisk. Saving or navigating will warn you about unfinished items but still allow you to proceed if you acknowledge the prompt.</li>
+            <li><strong>Fill-in-the-blank questions</strong> should contain visible blanks ("___"). If the source text uses undefined notions, add a short definition so the question is self-contained.</li>
+            <li><strong>Multiple choice questions</strong> automatically match the default option count. Adjust the count under Defaults if you need a different number for newly created items.</li>
+            <li><strong>Subfields</strong> accept multiple selections; click the × badge to remove one. Custom entries are appended to the joined “result” preview.</li>
+            <li><strong>Images</strong> live inside browser storage. Use “View large” to double-check resolution before exporting.</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">LLM Assistants</h4>
+          <ul>
+            <li><strong>Generate</strong> rewrites the current draft so it matches the selected problem type, fills blanks, and proposes structured metadata. It keeps your edits when possible—rerun after major changes.</li>
+            <li><strong>Translation assistant</strong> can pull text from the question or answer area, translate it, and write the translated copy back on demand.</li>
+            <li><strong>LaTeX correction</strong> walks through question or answer text and standardises symbols such as \(\alpha\), \(\mathbb{Z}\), or matrix layouts.</li>
+            <li><strong>OCR helper</strong> accepts screenshots, performs recognition via the OCR agent, and lets you paste recognised text directly into the editor.</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">Import, Export, and Versioning</h4>
+          <ul>
+            <li>Use <strong>Import XLSX</strong> to bring in existing datasets. Columns map automatically to internal fields; review the preview to confirm alignment.</li>
+            <li><strong>Export Datasets</strong> produces a JSON bundle with the current question bank, while <strong>Export XLSX</strong> gives you a spreadsheet snapshot suitable for manual review.</li>
+            <li><strong>Export Images</strong> bundles composed canvases and image blocks. Run this before clearing storage or moving to a different machine.</li>
+            <li>Every change is stored in your browser. Back up frequently by exporting, especially before clearing the bank or resetting defaults.</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">Troubleshooting</h4>
+          <ul>
+            <li>If an agent warns about missing credentials, revisit LLM Configuration and ensure provider, base URL, model, and API key are populated.</li>
+            <li>Stale completions? Click “Detailed settings” to edit prompts per agent, or use “Copy config from…” to reuse a working configuration.</li>
+            <li>When the generator output is off-topic, provide clearer source text, adjust the question type, and rerun with the updated context.</li>
+            <li>Browser storage limits vary. Use the storage indicator on the home screen to gauge remaining quota.</li>
           </ul>
         </div>
       </div>
@@ -59,20 +87,46 @@
         <div class="card" style="margin-top:12px">
           <h4 style="margin-top:0">使用流程</h4>
           <ul>
-            <li>在「LLM 配置」中为各代理填写 API Key、Base URL 与模型。</li>
-            <li>通过导入、粘贴或手动输入录入题目，必要时对截图执行 OCR。</li>
-            <li>使用翻译助手在中英文之间快速切换题目或答案文本。</li>
-            <li>生成或校对题目后，完善分支领域、难度、学段等元信息。</li>
-            <li>随时保存，整理完成后导出题目数据或合成图片。</li>
+            <li>首先打开「LLM 配置」，在「整体设置」中统一填写服务商、Base URL、模型与密钥，再根据需要微调各代理的提示词。</li>
+            <li>导入 Excel、粘贴文本或手动录入题目，也可以在图片面板上传截图并执行 OCR 获取原文。</li>
+            <li>在题目编辑区校对题干、答案和元信息（分支领域、学术水平、难度等），必填项旁会显示「*」。</li>
+            <li>利用 LLM 辅助工具将题干改写成目标题型、补充缺失定义，或在中英之间快速翻译。</li>
+            <li>定期保存并导出数据，以防浏览器缓存被清理或更换设备。</li>
           </ul>
         </div>
         <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">LLM 代理说明</h4>
+          <h4 style="margin-top:0">题目编辑提示</h4>
           <ul>
-            <li><strong>OCR 代理：</strong> 借助具备视觉能力的模型读取截图文字。</li>
-            <li><strong>翻译代理：</strong> 在中英文之间转换题目或答案，保持数学符号与 LaTeX 不变。</li>
-            <li><strong>LaTeX 校正代理：</strong> 统一数学表达式的 LaTeX 写法。</li>
-            <li><strong>题目生成代理：</strong> 将提示加工为完整的题目、答案及元数据。</li>
+            <li><strong>填空题</strong>务必加入显式空格（如「___」），若原题缺少定义，请补上一句简明定义以保持自洽。</li>
+            <li><strong>选择题</strong>会自动扩展到默认选项数量，必要时在「默认值」页面修改新建题目的选项数。</li>
+            <li><strong>分支领域</strong>支持多选，徽标右侧的×可快速删除；自定义条目会追加到最终结果字段。</li>
+            <li>保存或跳转下一题时若必填项未完成，会弹窗提示，可选择暂时忽略。</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">LLM 辅助工具</h4>
+          <ul>
+            <li><strong>使用 LLM 生成：</strong> 根据当前草稿重写题目并输出结构化字段，可多次迭代直至满足需求。</li>
+            <li><strong>翻译助手：</strong> 从题目或答案中提取文本、翻译并写回，保持数学符号与 LaTeX 原样。</li>
+            <li><strong>LaTeX 纠正：</strong> 将 Unicode 数学字符转换为规范的 LaTeX 命令。</li>
+            <li><strong>OCR 工具：</strong> 上传截图后由 OCR 代理识别文字，支持预览与一键写入题干。</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">导入、导出与备份</h4>
+          <ul>
+            <li>通过「导入 XLSX」加载既有题库，导入前请确认列名与模板字段对应。</li>
+            <li>「导出数据集」生成 JSON，方便继续加工；「导出 XLSX」适合人工校对。</li>
+            <li>「导出图片」将合成画布与图片块打包到本地，请在清空题库或更换浏览器前执行。</li>
+            <li>所有内容存放在浏览器本地存储，建议定期备份，避免意外丢失。</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin-top:0">常见问题</h4>
+          <ul>
+            <li>若提示未配置 LLM，请返回「LLM 配置」补全四个字段；可先在「整体设置」统一填写。</li>
+            <li>生成结果不理想时，可先补充上下文、切换题型或在提示词中提供更明确的要求，然后重新生成。</li>
+            <li>浏览器存储接近上限时，页面顶部的容量指示会变为橙色，请及时导出并清理。</li>
           </ul>
         </div>
       </div>

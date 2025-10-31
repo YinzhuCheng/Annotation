@@ -67,11 +67,14 @@ export async function generateProblemFromText(
   }
   if (targetType === 'Fill-in-the-blank') {
     user += '- Edit the question text so the unknown value is explicitly shown as one or more blanks (e.g., "___"). Do not leave the question unchanged if it lacks blanks.\n';
+    user += '- Introduce concise definitions or background (for example, define "good numbers") whenever the source text assumes context that the new question requires.\n';
+    user += '- When converting proof-style prompts, reshape them into concrete fill-in tasks (e.g., ask for a specific value, count, or example) that admit a short factual answer.\n';
     user += 'Example (ICL):\n';
     user += 'Original: "Let x + 3 = 7. Solve for x."\n';
     user += 'Output question: "Solve for x: ___ + 3 = 7."\n';
     user += '- Return the answer as the concrete value that fills the blank (e.g., "4"), not a narrative sentence.\n';
     user += 'Answer example: question "Solve for x: ___ + 3 = 7." -> answer "4".\n';
+    user += '- If there are multiple blanks, return the answer as an ordered JSON array of strings (e.g., ["4", "9"]).\n';
   }
   user += '- Ensure the answer matches the completed problem statement.\n';
   user += '- Return a single JSON object with keys question, questionType, options, answer, subfield, academicLevel, difficulty and no extra commentary.\n';

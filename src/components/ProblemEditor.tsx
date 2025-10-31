@@ -452,13 +452,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
             <div>
               <div className="label" style={{margin:0}}>{t('llmAssist')}</div>
+              <div className="small" style={{marginTop:6, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
               <div className="row" style={{gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8}}>
                 <button className="primary" onClick={generate}>{t('generate')}</button>
                 {(llmStatus !== 'idle' && llmStatus !== 'done') && (
                   <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                 )}
               </div>
-              <div className="small" style={{marginTop:4, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
             </div>
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
