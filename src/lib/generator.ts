@@ -1,81 +1,224 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
-import { jsonrepair } from 'jsonrepair';
 
-const JSON_STRING_REGEX = /"([^"\\]*(?:\\.[^"\\]*)*)"/gs;
+type RawValueType = 'string' | 'array' | 'object' | 'primitive';
 
-const escapeBareBackslashes = (text: string): string =>
-  text.replace(/(?<!\\)\\(?!["\\\/bfnrtu])/g, '\\\\');
+interface RawValueResult {
+  type: RawValueType;
+  value?: string;
+  raw?: string;
+  endIndex: number;
+}
 
-const escapeStringControlCharacters = (text: string): string =>
-  text.replace(JSON_STRING_REGEX, (match, inner) => {
-    const sanitized = inner.replace(/[\u0000-\u001F]/g, (char) => {
-      switch (char) {
-        case '\b':
-          return '\\b';
-        case '\f':
-          return '\\f';
-        case '\n':
-          return '\\n';
-        case '\r':
-          return '\\r';
-        case '\t':
-          return '\\t';
-        default: {
-          const code = char.charCodeAt(0).toString(16).padStart(4, '0');
-          return `\\u${code}`;
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const decodeEscapeSequence = (char: string): string => {
+  switch (char) {
+    case '"':
+      return '"';
+    case '\\':
+      return '\\';
+    case '/':
+      return '/';
+    case 'b':
+      return '\b';
+    case 'f':
+      return '\f';
+    case 'n':
+      return '\n';
+    case 'r':
+      return '\r';
+    case 't':
+      return '\t';
+    default:
+      return char;
+  }
+};
+
+const readStringLiteral = (
+  text: string,
+  startIndex: number
+): { value: string; endIndex: number; raw: string } => {
+  let i = startIndex + 1;
+  let value = '';
+  let raw = '"';
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      if (i + 1 >= text.length) break;
+      const next = text[i + 1];
+      raw += '\\' + next;
+      if (next === 'u' && i + 5 < text.length) {
+        const hex = text.substr(i + 2, 4);
+        raw += hex;
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          value += String.fromCharCode(parseInt(hex, 16));
+          i += 6;
+          continue;
         }
       }
-    });
-    return `"${sanitized}"`;
-  });
-
-const buildJsonRepairCandidates = (original: string): string[] => {
-  const candidates = new Set<string>();
-  const push = (value: string) => {
-    if (value && !candidates.has(value)) candidates.add(value);
-  };
-
-  push(original);
-  const backslashEscaped = escapeBareBackslashes(original);
-  push(backslashEscaped);
-  push(escapeStringControlCharacters(original));
-  push(escapeStringControlCharacters(backslashEscaped));
-  const trimmed = original.trim();
-  if (trimmed !== original) push(trimmed);
-
-  return Array.from(candidates);
-};
-
-const decodeBase64ToString = (input: string): string => {
-  const normalized = input.replace(/\s+/g, '');
-  if (!normalized) return '';
-  try {
-    if (typeof atob === 'function') {
-      const binary = atob(normalized);
-      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-      return new TextDecoder().decode(bytes);
+      value += decodeEscapeSequence(next);
+      i += 2;
+      continue;
     }
-  } catch (error) {
-    console.warn('Base64 decode via atob failed, attempting Buffer fallback', error);
-  }
-  try {
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(normalized, 'base64').toString('utf-8');
+    if (ch === '"') {
+      raw += '"';
+      return { value, endIndex: i + 1, raw };
     }
-  } catch (error) {
-    console.warn('Base64 decode via Buffer failed', error);
+    raw += ch;
+    value += ch;
+    i++;
   }
-  return input;
+  return { value, endIndex: startIndex + 1, raw };
 };
 
-const decodeTextField = (value: unknown): string => {
-  if (typeof value !== 'string') return '';
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const decoded = decodeBase64ToString(trimmed);
-  return decoded || trimmed;
+const readCollection = (
+  text: string,
+  startIndex: number,
+  openChar: string,
+  closeChar: string
+): { raw: string; endIndex: number } => {
+  let i = startIndex;
+  let depth = 0;
+  let raw = '';
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      const str = readStringLiteral(text, i);
+      raw += str.raw;
+      i = str.endIndex;
+      continue;
+    }
+    raw += ch;
+    if (ch === openChar) {
+      depth++;
+    } else if (ch === closeChar) {
+      depth--;
+      i++;
+      if (depth === 0) {
+        break;
+      }
+      continue;
+    }
+    i++;
+  }
+  return { raw, endIndex: i };
 };
+
+const findRawValue = (source: string, key: string): RawValueResult | null => {
+  const keyRegex = new RegExp(`"${escapeRegExp(key)}"\\s*:\\s*`, 'i');
+  const match = keyRegex.exec(source);
+  if (!match) return null;
+  let idx = match.index + match[0].length;
+  const len = source.length;
+  while (idx < len && /\s/.test(source[idx])) idx++;
+  if (idx >= len) return null;
+  const first = source[idx];
+  if (first === '"') {
+    const result = readStringLiteral(source, idx);
+    return { type: 'string', value: result.value, endIndex: result.endIndex };
+  }
+  if (first === '[') {
+    const collection = readCollection(source, idx, '[', ']');
+    return { type: 'array', raw: collection.raw, endIndex: collection.endIndex };
+  }
+  if (first === '{') {
+    const collection = readCollection(source, idx, '{', '}');
+    return { type: 'object', raw: collection.raw, endIndex: collection.endIndex };
+  }
+  let end = idx;
+  while (end < len && !/[,}\n\r]/.test(source[end])) end++;
+  const value = source.slice(idx, end).trim();
+  return { type: 'primitive', value, endIndex: end };
+};
+
+const decodeEscapedString = (input: string): string => {
+  const synthetic = `"${input}"`;
+  const result = readStringLiteral(synthetic, 0);
+  return result.value;
+};
+
+const extractStringValueLoose = (source: string, key: string): string => {
+  const found = findRawValue(source, key);
+  if (!found) return '';
+  if (found.type === 'string') {
+    return (found.value ?? '').trim();
+  }
+  if (found.type === 'primitive') {
+    return (found.value ?? '').trim().replace(/,$/, '');
+  }
+  return (found.raw ?? '').trim();
+};
+
+const parseArrayStrings = (raw: string): string[] => {
+  const text = raw.trim();
+  if (!text.startsWith('[')) return [];
+  const values: string[] = [];
+  let i = 1;
+  const len = text.length;
+  while (i < len - 1) {
+    while (i < len && /[\s,]/.test(text[i])) i++;
+    if (i >= len - 1) break;
+    const ch = text[i];
+    if (ch === '"') {
+      const str = readStringLiteral(text, i);
+      values.push(str.value.trim());
+      i = str.endIndex;
+      continue;
+    }
+    if (ch === '[' || ch === '{') {
+      const nested = readCollection(text, i, ch, ch === '[' ? ']' : '}');
+      i = nested.endIndex;
+      continue;
+    }
+    let j = i;
+    while (j < len && text[j] !== ',' && text[j] !== ']') j++;
+    const token = text.slice(i, j).trim();
+    if (token) values.push(token);
+    i = j;
+  }
+  return values;
+};
+
+const parseObjectStringValues = (raw: string): string[] => {
+  const text = raw.trim();
+  if (!text.startsWith('{')) return [];
+  const values: string[] = [];
+  const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    values.push(decodeEscapedString(match[2]).trim());
+  }
+  return values;
+};
+
+const extractOptionsLoose = (source: string): string[] => {
+  const found = findRawValue(source, 'options');
+  if (!found) return [];
+  if (found.type === 'array' && found.raw) {
+    return parseArrayStrings(found.raw);
+  }
+  if (found.type === 'object' && found.raw) {
+    return parseObjectStringValues(found.raw);
+  }
+  if (found.type === 'string' && found.value) {
+    return [found.value.trim()];
+  }
+  if (found.type === 'primitive' && found.value) {
+    return [found.value.trim()];
+  }
+  return [];
+};
+
+const extractFieldsFromJsonLike = (text: string) => ({
+  question: extractStringValueLoose(text, 'question'),
+  questionType: extractStringValueLoose(text, 'questionType'),
+  options: extractOptionsLoose(text),
+  answer: extractStringValueLoose(text, 'answer'),
+  subfield: extractStringValueLoose(text, 'subfield'),
+  academicLevel: extractStringValueLoose(text, 'academicLevel'),
+  difficulty: extractStringValueLoose(text, 'difficulty')
+});
 
 export interface GeneratorConversationTurn {
   prompt: string;
@@ -168,11 +311,10 @@ export async function generateProblemFromText(
   user += '   - Fill-in-the-blank: insert exactly one explicit blank such as "___". When the source only asserts existence, ask for a single concrete witness or numerical property that fills that blank, and return the answer as a single consistent string (e.g., "4").\n';
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
   user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
+  user += '   - Always present your reply in two blocks: first "Analysis:" with your reasoning, then "JSON:" with the object.\n';
   user += '   - All JSON strings must escape backslashes, quotes, and control characters using standard JSON escaping (e.g., \\theta, \\n).\n';
   user += '   - Do not wrap the JSON or any string fields in LaTeX math delimiters such as $...$ or \\(...\\). Provide raw JSON only.\n';
   user += '   - Example: write the LaTeX fraction 1/2 as "\\\\frac{1}{2}" inside the JSON; writing "\\frac{1}{2}" will be rejected as invalid JSON.\n';
-  user += '   - Encode the values of "question", "answer", "subfield", "academicLevel", "difficulty", and every entry inside "options" using standard Base64 (UTF-8) before placing them in the JSON.\n';
-  user += '   - Generate the Base64 from the original LaTeX/plaintext without adding extra escapes, so that decoding the Base64 yields the exact wording you intend the user to see.\n';
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
@@ -220,103 +362,51 @@ export async function generateProblemFromText(
     throw new LLMGenerationError('LLM response JSON section empty', raw);
   }
 
-  let obj: any;
-  try {
-    obj = JSON.parse(jsonText);
-  } catch (initialError) {
-    const candidates = buildJsonRepairCandidates(jsonText);
-    let lastError: unknown = initialError;
-    for (const candidate of candidates) {
-      try {
-        obj = JSON.parse(candidate);
-        if (candidate !== jsonText) {
-          console.warn('Recovered JSON using auto-escape repair');
-          jsonText = candidate;
-        }
-        lastError = undefined;
-        break;
-      } catch (candidateError) {
-        lastError = candidateError;
-      }
-    }
-    if (typeof obj === 'undefined') {
-      try {
-        const repairedText = jsonrepair(jsonText);
-        obj = JSON.parse(repairedText);
-        jsonText = repairedText;
-        console.warn('Recovered JSON via jsonrepair fallback');
-        lastError = undefined;
-      } catch (repairError) {
-        lastError = repairError;
-      }
-    }
-    if (typeof obj === 'undefined') {
-      console.error('Failed to parse repaired LLM JSON response', lastError, candidates);
-      throw new LLMGenerationError('Failed to parse repaired LLM JSON response', raw, lastError);
-    }
-  }
+  const extracted = extractFieldsFromJsonLike(jsonText);
+
+  const sanitizeText = (value: string): string => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return '';
+    return trimmed;
+  };
 
   const allowedQuestionTypes: ProblemRecord['questionType'][] = ['Multiple Choice', 'Fill-in-the-blank', 'Proof'];
-  const llmQuestionTypeRaw = typeof obj.questionType === 'string' ? obj.questionType.trim() : '';
+  const llmQuestionTypeRaw = sanitizeText(extracted.questionType);
   const questionType: ProblemRecord['questionType'] = allowedQuestionTypes.includes(llmQuestionTypeRaw as ProblemRecord['questionType'])
     ? (llmQuestionTypeRaw as ProblemRecord['questionType'])
     : targetType;
 
-  const questionDecoded = decodeTextField(obj.question);
-  const question = questionDecoded || existingQuestion || baseInput;
+  const questionCandidate = sanitizeText(extracted.question);
+  const question = questionCandidate || existingQuestion || baseInput;
 
-  const rawOptions = (obj as any)?.options;
-  const llmOptions: string[] = (() => {
-    if (Array.isArray(rawOptions)) {
-      return rawOptions.map((o: any) => decodeTextField(o).trim());
-    }
-    if (rawOptions && typeof rawOptions === 'object') {
-      return Object.entries(rawOptions as Record<string, unknown>)
-        .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-        .map(([, value]) => decodeTextField(value).trim());
-    }
-    if (typeof rawOptions === 'string') {
-      const lines = rawOptions
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      if (lines.length > 0) {
-        return lines.map((line) => decodeTextField(line.replace(/^[A-Z][\.\)]?\s*/i, '').trim()));
-      }
-    }
-    return [];
-  })();
+  const llmOptions = extracted.options
+    .map((option) => sanitizeText(option))
+    .filter((option) => option.length > 0);
+
   const normalizedOptions = questionType === 'Multiple Choice'
     ? Array.from({ length: expectedOptionsCount }, (_, idx) => {
-        const llmValue = llmOptions[idx]?.trim();
+        const llmValue = llmOptions[idx];
         if (llmValue) return llmValue;
         const existingValue = existingOptionsNormalized[idx]?.trim();
         return existingValue || '';
       })
     : [];
 
-  let answer = '';
-  if (typeof obj.answer === 'string') {
-    answer = decodeTextField(obj.answer);
-  } else if (Array.isArray(obj.answer)) {
-    answer = obj.answer.map((entry: unknown) => decodeTextField(entry)).filter((entry) => entry.length > 0).join('\n');
-  }
+  let answer = sanitizeText(extracted.answer);
   if (!answer) {
     answer = existingAnswer || '';
   }
 
   const fallbackSubfield = defaults.subfieldOptions[0] ?? 'Others';
-  const subfield = decodeTextField(obj.subfield) || existingSubfield || fallbackSubfield;
+  const subfield = sanitizeText(extracted.subfield) || existingSubfield || fallbackSubfield;
 
   const fallbackAcademic = defaults.academicLevels[0] ?? 'K12';
-  const academicLevel = decodeTextField(obj.academicLevel) || existingAcademic || fallbackAcademic;
+  const academicLevel = sanitizeText(extracted.academicLevel) || existingAcademic || fallbackAcademic;
 
   const fallbackDifficulty = defaults.difficultyOptions[0] ?? '1';
-  const difficulty = typeof obj.difficulty === 'string'
-    ? decodeTextField(obj.difficulty) || existingDifficulty || fallbackDifficulty
-    : typeof obj.difficulty === 'number'
-      ? String(obj.difficulty)
-      : existingDifficulty || fallbackDifficulty;
+  const difficultyCandidate = sanitizeText(extracted.difficulty);
+  const difficulty = difficultyCandidate || existingDifficulty || fallbackDifficulty;
 
   const patch: Partial<ProblemRecord> = {
     question,
