@@ -40,7 +40,7 @@
             <li>Start in <strong>LLM Configuration</strong> and enter provider, base URL, model, and API key for every agent. The “Overall settings” section applies the same credentials to all four agents at once.</li>
             <li>Capture raw material by importing spreadsheets, pasting text, or uploading screenshots for OCR. You can mix-and-match these approaches for a single problem.</li>
             <li>Switch to the problem editor to refine wording, pick subfields, and record metadata such as academic level and difficulty.</li>
-            <li>Use the LLM assist tools to rephrase the question for the chosen type, translate content, or normalise LaTeX. Review the generated draft before saving.</li>
+            <li>Use the LLM assist tools to rephrase the question for the chosen type, translate content, or deliver MathJax-friendly LaTeX. Review the generated draft before saving.</li>
             <li>When a batch is complete, export structured data (JSON/XLSX) and any composed images to archive your work.</li>
           </ul>
         </div>
@@ -59,7 +59,7 @@
           <ul>
             <li><strong>Generate</strong> rewrites the current draft so it matches the selected problem type, fills blanks, and proposes structured metadata. It keeps your edits when possible—rerun after major changes.</li>
             <li><strong>Translation assistant</strong> can pull text from the question or answer area, translate it, and write the translated copy back on demand.</li>
-            <li><strong>LaTeX correction</strong> walks through question or answer text and standardises symbols such as \(\alpha\), \(\mathbb{Z}\), or matrix layouts.</li>
+            <li><strong>LaTeX correction</strong> walks through question or answer text, standardises symbols such as \(\alpha\), \(\mathbb{Z}\), or matrix layouts, and ensures MathJax renders them without errors.</li>
             <li><strong>OCR helper</strong> accepts screenshots, performs recognition via the OCR agent, and lets you paste recognised text directly into the editor.</li>
           </ul>
         </div>
@@ -107,8 +107,8 @@
           <h4 style="margin-top:0">LLM 辅助工具</h4>
           <ul>
             <li><strong>使用 LLM 生成：</strong> 根据当前草稿重写题目并输出结构化字段，可多次迭代直至满足需求。</li>
-            <li><strong>翻译助手：</strong> 从题目或答案中提取文本、翻译并写回，保持数学符号与 LaTeX 原样。</li>
-            <li><strong>LaTeX 纠正：</strong> 将 Unicode 数学字符转换为规范的 LaTeX 命令。</li>
+            <li><strong>翻译助手：</strong> 从题目或答案中提取文本、翻译并写回，保持数学符号与 LaTeX（兼容 MathJax）原样。</li>
+            <li><strong>LaTeX 纠正：</strong> 将 Unicode 数学字符转换为适配 MathJax 的规范 LaTeX 表达。</li>
             <li><strong>OCR 工具：</strong> 上传截图后由 OCR 代理识别文字，支持预览与一键写入题干。</li>
           </ul>
         </div>

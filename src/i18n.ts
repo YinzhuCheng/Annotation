@@ -33,7 +33,7 @@ const resources = {
       type_hint: 'It is better not to include proof questions for now. They can be collected later in bulk without manual annotation.',
       generate: 'Generate with LLM',
       latexFix: 'LaTeX Correction',
-      latexFixHint: 'This will convert nonstandard symbols (e.g., ℤ) into LaTeX (e.g., \\mathbb{Z}).',
+      latexFixHint: 'Normalize expressions so they render correctly in MathJax (e.g., ℤ → \\mathbb{Z}).',
       subfield: 'Subfield',
       subfield_others: 'Others (custom)',
       source: 'Source',
@@ -95,12 +95,17 @@ const resources = {
       assistToolTranslation: 'Translation assistant',
       assistToolOcr: 'Image text extraction',
       assistToolLatex: 'LaTeX render',
-      assistToolLatexHint: 'Paste LaTeX code or load the current question/answer, then preview the rendered result.',
+      assistToolLatexHint: 'Paste LaTeX code or load the current question/answer, then preview the MathJax render.',
       assistToolLatexPlaceholder: 'Paste LaTeX code here...',
       assistToolLatexLoadQuestion: 'Load question text',
       assistToolLatexLoadAnswer: 'Load answer text',
       assistToolLatexClear: 'Clear content',
-      assistToolLatexError: 'Render failed: {{error}}',
+      assistToolLatexFix: 'Fix with LLM',
+      assistToolLatexErrorsTitle: 'MathJax parser issues',
+      assistToolLatexNoIssues: 'No MathJax parser errors detected.',
+      assistToolLatexLoading: 'MathJax is still loading…',
+      assistToolLatexUnavailable: 'MathJax is unavailable in this environment.',
+      assistToolLatexRenderError: 'Render failed: {{error}}',
       yourMessage: 'Your message',
       send: 'Send',
       waitingLLMResponse: 'Waiting for LLM response',
@@ -153,7 +158,7 @@ const resources = {
       , agentOcr: 'OCR Agent'
       , agentOcrDesc: 'Handles OCR tasks for image-to-text extraction.'
       , agentLatex: 'LaTeX Correction Agent'
-      , agentLatexDesc: 'Normalizes mathematical expressions into LaTeX.'
+      , agentLatexDesc: 'Normalizes mathematical expressions into MathJax-compatible LaTeX.'
       , agentGenerator: 'Problem Generation Agent'
       , agentGeneratorDesc: 'Creates draft problems and solutions.'
       , agentTranslator: 'Translation Agent'
@@ -219,7 +224,7 @@ const resources = {
       type_hint: '目前不建议包含证明题，后续可从题库批量收集。',
       generate: '使用 LLM 生成',
       latexFix: 'LaTeX 纠正',
-      latexFixHint: '该操作会把非标准符号（如 ℤ）转换为合法 LaTeX（如 \\mathbb{Z}）。',
+      latexFixHint: '将表达式规范化以确保可在 MathJax 中正确渲染（例如 ℤ → \\mathbb{Z}）。',
       subfield: '分支领域',
       subfield_others: '其他（自定义）',
       source: '来源',
@@ -281,12 +286,17 @@ const resources = {
       assistToolTranslation: '翻译助手',
       assistToolOcr: '图片提取文字',
       assistToolLatex: 'LaTeX渲染',
-      assistToolLatexHint: '粘贴 LaTeX 代码或载入当前题目/解答文本，立即查看渲染效果。',
+      assistToolLatexHint: '粘贴 LaTeX 代码或载入题目/解答文本，查看 MathJax 渲染效果。',
       assistToolLatexPlaceholder: '在此粘贴 LaTeX 代码...',
       assistToolLatexLoadQuestion: '载入题目文本',
       assistToolLatexLoadAnswer: '载入答案文本',
       assistToolLatexClear: '清空内容',
-      assistToolLatexError: '渲染失败：{{error}}',
+      assistToolLatexFix: '使用 LLM 校正',
+      assistToolLatexErrorsTitle: 'MathJax 解析问题',
+      assistToolLatexNoIssues: 'MathJax 未报告解析错误。',
+      assistToolLatexLoading: 'MathJax 正在加载…',
+      assistToolLatexUnavailable: '当前环境无法使用 MathJax。',
+      assistToolLatexRenderError: '渲染失败：{{error}}',
       yourMessage: '你的消息',
       send: '发送',
       waitingLLMResponse: '等待 LLM 响应',
@@ -339,7 +349,7 @@ const resources = {
       , agentOcr: 'OCR 代理'
       , agentOcrDesc: '用于图像文字识别。'
       , agentLatex: 'LaTeX 校正代理'
-      , agentLatexDesc: '将数学表达式标准化为 LaTeX。'
+      , agentLatexDesc: '将数学表达式标准化为适配 MathJax 的 LaTeX。'
       , agentGenerator: '题目生成代理'
       , agentGeneratorDesc: '负责生成题目与解答草稿。'
       , agentTranslator: '翻译代理'

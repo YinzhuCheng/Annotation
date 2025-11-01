@@ -5,8 +5,6 @@ import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -50,8 +48,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
+  const latexPreviewRef = useRef<HTMLDivElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
-  const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'ocr'>(null);
+  const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'latex_preview' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
   const [translationInput, setTranslationInput] = useState('');
   const [translationOutput, setTranslationOutput] = useState('');
@@ -63,8 +62,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latestFeedback, setLatestFeedback] = useState('');
   const [feedbackSavedAt, setFeedbackSavedAt] = useState<number | null>(null);
   const [latexInput, setLatexInput] = useState('');
-  const [latexHtml, setLatexHtml] = useState('');
-  const [latexError, setLatexError] = useState('');
+  const [latexRenderError, setLatexRenderError] = useState('');
+  const [latexErrors, setLatexErrors] = useState<string[]>([]);
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -72,6 +71,40 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     translator: t('agentTranslator')
   }), [t]);
   const CUSTOM_OPTION = '__custom__';
+
+  const ensureMathJaxReady = async () => {
+    const mj = (window as any).MathJax;
+    if (!mj) {
+      throw new Error(t('assistToolLatexLoading'));
+    }
+    if (mj.startup?.promise) {
+      await mj.startup.promise;
+    }
+    if (typeof mj.typesetPromise !== 'function') {
+      throw new Error(t('assistToolLatexUnavailable'));
+    }
+    return mj;
+  };
+
+  const composeLatexCorrectionInput = (snippet: string, reportLines?: string[], contextLabel?: string) => {
+    const lines: string[] = [];
+    lines.push('MathJax rendering is used in our application.');
+    if (contextLabel) {
+      lines.push(`Context: ${contextLabel}`);
+    }
+    lines.push('MathJax render report:');
+    if (reportLines && reportLines.length > 0) {
+      reportLines.forEach((line, idx) => {
+        lines.push(`${idx + 1}. ${line}`);
+      });
+    } else {
+      lines.push('No explicit parser errors were reported. Please still ensure MathJax compatibility.');
+    }
+    lines.push('---');
+    lines.push('Original LaTeX snippet:');
+    lines.push(snippet);
+    return lines.join('\n');
+  };
 
   useEffect(() => {
     if (!current) return;
@@ -87,8 +120,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLatestFeedback('');
     setFeedbackSavedAt(null);
     setLatexInput('');
-    setLatexHtml('');
-    setLatexError('');
+    setLatexRenderError('');
+    setLatexErrors([]);
   }, [current.id]);
 
   useEffect(() => {
@@ -98,21 +131,40 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   }, [feedbackSavedAt]);
 
   useEffect(() => {
-    const source = latexInput.trim();
-    if (!source) {
-      setLatexHtml('');
-      setLatexError('');
-      return;
-    }
-    try {
-      const rendered = katex.renderToString(source, { throwOnError: true, displayMode: true });
-      setLatexHtml(rendered);
-      setLatexError('');
-    } catch (error: any) {
-      const message = error?.message ? String(error.message) : String(error);
-      setLatexHtml('');
-      setLatexError(message);
-    }
+    const container = latexPreviewRef.current;
+    if (!container) return;
+    let cancelled = false;
+
+    const render = async () => {
+      const source = latexInput.trim();
+      setLatexRenderError('');
+      setLatexErrors([]);
+      if (!source) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = '';
+      container.textContent = source;
+      try {
+        const mj = await ensureMathJaxReady();
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        setLatexErrors(errors);
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setLatexRenderError(message);
+      }
+    };
+
+    render();
+    return () => {
+      cancelled = true;
+    };
   }, [latexInput]);
 
   useEffect(() => {
@@ -207,7 +259,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!text?.trim()) return;
     if (!ensureAgent('latex')) return;
     setLlmStatusSource(field === 'question' ? 'latex_question' : 'latex_answer');
-    const corrected = await latexCorrection(text, agents.latex, { onStatus: (s)=> setLlmStatus(s) });
+    const payload = composeLatexCorrectionInput(text, undefined, field === 'question' ? 'Question field' : 'Answer field');
+    const corrected = await latexCorrection(payload, agents.latex, { onStatus: (s)=> setLlmStatus(s) });
     update({ [field]: corrected } as any);
     setLlmStatus('done');
   };
@@ -285,6 +338,30 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const latexHasSource = latexInput.trim().length > 0;
+
+  const fixLatexPreview = async () => {
+    const source = latexInput.trim();
+    if (!source) return;
+    if (!ensureAgent('latex')) return;
+    const previousRenderError = latexRenderError;
+    setLatexRenderError('');
+    setLlmStatusSource('latex_preview');
+    try {
+      const uniqueErrors = latexErrors.length > 0 ? Array.from(new Set(latexErrors)) : undefined;
+      const fallbackReport = !uniqueErrors && previousRenderError ? [previousRenderError] : undefined;
+      const payload = composeLatexCorrectionInput(source, uniqueErrors ?? fallbackReport, 'MathJax preview panel');
+      const corrected = await latexCorrection(payload, agents.latex, { onStatus: (s) => setLlmStatus(s) });
+      setLatexInput(corrected);
+      setLatexErrors([]);
+      setLatexRenderError('');
+      setLlmStatus('done');
+    } catch (error: any) {
+      const message = error?.message ? String(error.message) : String(error);
+      setLatexRenderError(message);
+      setLlmStatus('idle');
+      setLlmStatusSource(null);
+    }
+  };
 
   const runTranslation = async () => {
     const payload = translationInput.trim();
@@ -683,6 +760,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 <button type="button" onClick={()=> loadLatexFrom('question')}>{t('assistToolLatexLoadQuestion')}</button>
                 <button type="button" onClick={()=> loadLatexFrom('answer')}>{t('assistToolLatexLoadAnswer')}</button>
                 <button type="button" onClick={clearLatexInput} disabled={!latexHasSource}>{t('assistToolLatexClear')}</button>
+                <div className="row" style={{gap:6, alignItems:'center'}}>
+                  <button type="button" className="primary" onClick={fixLatexPreview} disabled={!latexHasSource}>{t('assistToolLatexFix')}</button>
+                  {(llmStatusSource === 'latex_preview' && llmStatus !== 'idle' && llmStatus !== 'done') && (
+                    <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
+                  )}
+                </div>
               </div>
               <textarea
                 value={latexInput}
@@ -691,13 +774,27 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 placeholder={t('assistToolLatexPlaceholder')}
                 style={{marginTop:8, fontFamily:'var(--font-mono, monospace)'}}
               />
-              {latexError && (
-                <span className="small" style={{color:'#f87171'}}>{t('assistToolLatexError', { error: latexError })}</span>
+              {latexRenderError && (
+                <span className="small" style={{color:'#f87171'}}>{t('assistToolLatexRenderError', { error: latexRenderError })}</span>
               )}
-              {latexHtml && (
-                <div style={{marginTop:8, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)'}}>
-                  <div dangerouslySetInnerHTML={{ __html: latexHtml }} />
+              {latexErrors.length > 0 && (
+                <div className="small" style={{marginTop:8}}>
+                  <div style={{fontWeight:600}}>{t('assistToolLatexErrorsTitle')}</div>
+                  <ul style={{margin:'4px 0 0 0', paddingLeft:18}}>
+                    {latexErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
                 </div>
+              )}
+              {latexHasSource && !latexRenderError && latexErrors.length === 0 && (
+                <span className="small" style={{color:'var(--text-muted)', display:'block', marginTop:8}}>{t('assistToolLatexNoIssues')}</span>
+              )}
+              {latexHasSource && (
+                <div
+                  ref={latexPreviewRef}
+                  style={{marginTop:8, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                />
               )}
             </div>
             <hr className="div" style={{margin:'12px 0'}} />
