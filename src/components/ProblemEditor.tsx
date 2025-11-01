@@ -5,6 +5,8 @@ import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -60,6 +62,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [generatorHistory, setGeneratorHistory] = useState<GeneratorTurnState[]>([]);
   const [latestFeedback, setLatestFeedback] = useState('');
   const [feedbackSavedAt, setFeedbackSavedAt] = useState<number | null>(null);
+  const [latexInput, setLatexInput] = useState('');
+  const [latexHtml, setLatexHtml] = useState('');
+  const [latexError, setLatexError] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -81,6 +86,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setGeneratorPreview('');
     setLatestFeedback('');
     setFeedbackSavedAt(null);
+    setLatexInput('');
+    setLatexHtml('');
+    setLatexError('');
   }, [current.id]);
 
   useEffect(() => {
@@ -88,6 +96,24 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const timer = setTimeout(() => setFeedbackSavedAt(null), 2000);
     return () => clearTimeout(timer);
   }, [feedbackSavedAt]);
+
+  useEffect(() => {
+    const source = latexInput.trim();
+    if (!source) {
+      setLatexHtml('');
+      setLatexError('');
+      return;
+    }
+    try {
+      const rendered = katex.renderToString(source, { throwOnError: true, displayMode: true });
+      setLatexHtml(rendered);
+      setLatexError('');
+    } catch (error: any) {
+      const message = error?.message ? String(error.message) : String(error);
+      setLatexHtml('');
+      setLatexError(message);
+    }
+  }, [latexInput]);
 
   useEffect(() => {
     const active = (llmStatus !== 'idle' && llmStatus !== 'done') || (translationStatus !== 'idle' && translationStatus !== 'done');
@@ -243,6 +269,22 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLatestFeedback('');
     setFeedbackSavedAt(Date.now());
   };
+
+  const loadLatexFrom = (field: 'question' | 'answer') => {
+    const text = (current as any)[field] as string;
+    setLatexInput(text || '');
+  };
+
+  const clearLatexInput = () => {
+    setLatexInput('');
+  };
+
+  const clearAttachedImage = () => {
+    update({ image: '', imageDependency: 0 });
+    setConfirmedImageUrl('');
+  };
+
+  const latexHasSource = latexInput.trim().length > 0;
 
   const runTranslation = async () => {
     const payload = translationInput.trim();
@@ -521,21 +563,29 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           {confirmedImageUrl && (
             <div className="card" style={{marginBottom:12}}>
               <div className="row" style={{gap:8, alignItems:'center', justifyContent:'space-between'}}>
-                <div className="row" style={{gap:8}}>
+                <div className="row" style={{gap:8, alignItems:'center'}}>
                   <span className="badge">{t('imageAttached')}</span>
-                  <span className="small">Image_dependency=1</span>
+                  <span className="small">{t('imageDependencyLabel')}</span>
                 </div>
-                <button onClick={()=> openViewer(confirmedImageUrl)}>{t('viewLarge')}</button>
+                <div className="row" style={{gap:8, alignItems:'center'}}>
+                  <button onClick={()=> openViewer(confirmedImageUrl)}>{t('viewLarge')}</button>
+                  <button onClick={clearAttachedImage} aria-label={t('clearImageAttachment')}>{t('clearImageAttachment')}</button>
+                </div>
               </div>
               <img src={confirmedImageUrl} style={{maxWidth:'100%', maxHeight:200, borderRadius:8, border:'1px solid var(--border)', marginTop:8}} />
             </div>
           )}
           <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
             <div>
-              <div className="label" style={{margin:0}}>{t('llmAssist')}</div>
+              <div className="label" style={{margin:0, fontSize:'1.15rem', fontWeight:600}}>{t('assistToolsTitle')}</div>
               <div className="small" style={{marginTop:6, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
+            </div>
+
+            <div>
+              <div className="label" style={{marginBottom:4}}>{t('assistToolGenerator')}</div>
+              <div className="small" style={{color:'var(--text-muted)'}}>{t('assistToolGeneratorHint')}</div>
               <div className="row" style={{gap:8, flexWrap:'wrap', alignItems:'center', marginTop:8}}>
-                <button className="primary" onClick={generate}>{t('generate')}</button>
+                <button className="primary" onClick={generate}>{t('assistToolGeneratorAction')}</button>
                 {(llmStatusSource === 'generate' && llmStatus !== 'idle' && llmStatus !== 'done') && (
                   <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                 )}
@@ -591,7 +641,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <hr className="div" style={{margin:'12px 0'}} />
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
-                <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
+                <div className="label" style={{margin:0}}>{t('assistToolTranslation')}</div>
                 <div className="row" style={{gap:8, flexWrap:'wrap'}}>
                   <button type="button" onClick={() => loadTranslationFrom('question')}>{t('translationLoadQuestion')}</button>
                   <button type="button" onClick={() => loadTranslationFrom('answer')}>{t('translationLoadAnswer')}</button>
@@ -627,7 +677,33 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
             <hr className="div" style={{margin:'12px 0'}} />
             <div>
-              <div className="label">{t('uploadImage')}</div>
+              <div className="label" style={{marginBottom:4}}>{t('assistToolLatex')}</div>
+              <div className="small" style={{color:'var(--text-muted)'}}>{t('assistToolLatexHint')}</div>
+              <div className="row" style={{gap:8, flexWrap:'wrap', marginTop:8}}>
+                <button type="button" onClick={()=> loadLatexFrom('question')}>{t('assistToolLatexLoadQuestion')}</button>
+                <button type="button" onClick={()=> loadLatexFrom('answer')}>{t('assistToolLatexLoadAnswer')}</button>
+                <button type="button" onClick={clearLatexInput} disabled={!latexHasSource}>{t('assistToolLatexClear')}</button>
+              </div>
+              <textarea
+                value={latexInput}
+                onChange={(e)=> setLatexInput(e.target.value)}
+                rows={6}
+                placeholder={t('assistToolLatexPlaceholder')}
+                style={{marginTop:8, fontFamily:'var(--font-mono, monospace)'}}
+              />
+              {latexError && (
+                <span className="small" style={{color:'#f87171'}}>{t('assistToolLatexError', { error: latexError })}</span>
+              )}
+              {latexHtml && (
+                <div style={{marginTop:8, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)'}}>
+                  <div dangerouslySetInnerHTML={{ __html: latexHtml }} />
+                </div>
+              )}
+            </div>
+            <hr className="div" style={{margin:'12px 0'}} />
+            <div>
+              <div className="label" style={{marginBottom:4}}>{t('assistToolOcr')}</div>
+              <div className="small" style={{color:'var(--text-muted)'}}>{t('uploadImage')}</div>
               <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
                 <div className="row" style={{justifyContent:'center', gap:8}}>
                   <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
