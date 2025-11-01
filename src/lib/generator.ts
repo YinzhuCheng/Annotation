@@ -7,6 +7,19 @@ export interface GeneratorConversationTurn {
   feedback?: string;
 }
 
+export class LLMGenerationError extends Error {
+  raw: string;
+
+  constructor(message: string, raw: string, cause?: unknown) {
+    super(message);
+    this.name = 'LLMGenerationError';
+    this.raw = raw;
+    if (cause !== undefined) {
+      (this as any).cause = cause;
+    }
+  }
+}
+
 export async function generateProblemFromText(
   input: string,
   existing: ProblemRecord,
@@ -106,7 +119,7 @@ export async function generateProblemFromText(
   const jsonMarker = raw.indexOf('JSON:');
   if (jsonMarker === -1) {
     console.error('LLM response missing JSON section', raw);
-    throw new Error('LLM response missing JSON section');
+    throw new LLMGenerationError('LLM response missing JSON section', raw);
   }
   let jsonText = raw.slice(jsonMarker + 5).trim();
   const CODE_FENCES = ['```json', '```JSON', '```'];
@@ -123,7 +136,7 @@ export async function generateProblemFromText(
   }
   if (!jsonText) {
     console.error('LLM response JSON section empty', raw);
-    throw new Error('LLM response JSON section empty');
+    throw new LLMGenerationError('LLM response JSON section empty', raw);
   }
 
   let obj: any;
@@ -137,11 +150,11 @@ export async function generateProblemFromText(
         console.warn('Recovered JSON by escaping invalid backslashes');
       } catch (innerError) {
         console.error('Failed to parse repaired LLM JSON response', innerError, repaired);
-        throw innerError instanceof Error ? innerError : new Error(String(innerError));
+        throw new LLMGenerationError('Failed to parse repaired LLM JSON response', raw, innerError);
       }
     } else {
       console.error('Failed to parse LLM JSON response', error, jsonText);
-      throw error instanceof Error ? error : new Error(String(error));
+      throw new LLMGenerationError('Failed to parse LLM JSON response', raw, error);
     }
   }
 

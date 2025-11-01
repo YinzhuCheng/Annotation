@@ -4,7 +4,7 @@ import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
-import { generateProblemFromText, GeneratorConversationTurn } from '../lib/generator';
+import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -216,7 +216,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     } catch (err: any) {
       const message = err?.message ? String(err.message) : String(err);
       console.error('Generate with LLM failed:', err);
-      setGeneratorPreview(`Error: ${message}`);
+      if (err instanceof LLMGenerationError) {
+        const combined = err.raw?.trim() ? `${message}\n\n${err.raw}` : message;
+        setGeneratorPreview(combined);
+      } else {
+        setGeneratorPreview(`Error: ${message}`);
+      }
       setLlmStatus('idle');
       setLlmStatusSource(null);
       alert(message);
