@@ -311,10 +311,24 @@ export async function generateProblemFromText(
   user += '   - Fill-in-the-blank: insert exactly one explicit blank such as "___". When the source only asserts existence, ask for a single concrete witness or numerical property that fills that blank, and return the answer as a single consistent string (e.g., "4").\n';
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
   user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
-  user += '   - Always present your reply in two blocks: first "Analysis:" with your reasoning, then "JSON:" with the object.\n';
+  user += '   - Format requirements:\n';
+  user += '     ? The reply must start with "Analysis:" and end that block with a blank line.\n';
+  user += '     ? Immediately after the blank line, emit the exact HTTP-style headers:\n';
+  user += '       HTTP/1.1 200 OK\n';
+  user += '       Content-Type: application/json\n';
+  user += '       (blank line)\n';
+  user += '     ? Then write the literal marker "JSON:" on its own line followed by the JSON object.\n';
   user += '   - All JSON strings must escape backslashes, quotes, and control characters using standard JSON escaping (e.g., \\theta, \\n).\n';
   user += '   - Do not wrap the JSON or any string fields in LaTeX math delimiters such as $...$ or \\(...\\). Provide raw JSON only.\n';
-  user += '   - Example: write the LaTeX fraction 1/2 as "\\\\frac{1}{2}" inside the JSON; writing "\\frac{1}{2}" will be rejected as invalid JSON.\n';
+  user += '   - Example sequence (spacing matters):\n';
+  user += '     Analysis:\n';
+  user += '     <reasoning>\n';
+  user += '     \n';
+  user += '     HTTP/1.1 200 OK\n';
+  user += '     Content-Type: application/json\n';
+  user += '     \n';
+  user += '     JSON:\n';
+  user += '     {"question": "...", ...}\n';
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
