@@ -4,7 +4,9 @@ import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
 import { getImageBlob } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
-import { generateProblemFromText } from '../lib/generator';
+import { generateProblemFromText, GeneratorConversationTurn } from '../lib/generator';
+
+type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
 export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
@@ -55,6 +57,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [translationTarget, setTranslationTarget] = useState<'en' | 'zh'>('zh');
   const [translationError, setTranslationError] = useState('');
   const [generatorPreview, setGeneratorPreview] = useState('');
+  const [generatorHistory, setGeneratorHistory] = useState<GeneratorTurnState[]>([]);
+  const [latestFeedback, setLatestFeedback] = useState('');
+  const [feedbackSavedAt, setFeedbackSavedAt] = useState<number | null>(null);
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -70,6 +75,19 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setTranslationError('');
     setTranslationStatus('idle');
   }, [current.id]);
+
+  useEffect(() => {
+    setGeneratorHistory([]);
+    setGeneratorPreview('');
+    setLatestFeedback('');
+    setFeedbackSavedAt(null);
+  }, [current.id]);
+
+  useEffect(() => {
+    if (!feedbackSavedAt) return;
+    const timer = setTimeout(() => setFeedbackSavedAt(null), 2000);
+    return () => clearTimeout(timer);
+  }, [feedbackSavedAt]);
 
   useEffect(() => {
     const active = (llmStatus !== 'idle' && llmStatus !== 'done') || (translationStatus !== 'idle' && translationStatus !== 'done');
@@ -175,9 +193,25 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLlmStatusSource('generate');
     setGeneratorPreview('');
     try {
-      const patch = await generateProblemFromText(input, current, agents.generator, defaults, { onStatus: (s)=> setLlmStatus(s) });
-      update(patch);
-      setGeneratorPreview(JSON.stringify(patch, null, 2));
+      const conversation = generatorHistory.map(({ prompt, response, feedback }) => ({ prompt, response, feedback }));
+      const result = await generateProblemFromText(input, current, agents.generator, defaults, {
+        onStatus: (s) => setLlmStatus(s),
+        conversation
+      });
+      update(result.patch);
+      setGeneratorPreview(JSON.stringify(result.patch, null, 2));
+      setGeneratorHistory((prev) => [
+        ...prev,
+        {
+          prompt: input,
+          response: result.raw,
+          feedback: undefined,
+          patch: result.patch,
+          timestamp: Date.now()
+        }
+      ]);
+      setLatestFeedback('');
+      setFeedbackSavedAt(null);
       setLlmStatus('done');
     } catch (err: any) {
       const message = err?.message ? String(err.message) : String(err);
@@ -187,6 +221,22 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       setLlmStatusSource(null);
       alert(message);
     }
+  };
+
+  const handleSubmitFeedback = () => {
+    if (generatorHistory.length === 0) return;
+    const trimmed = latestFeedback.trim();
+    setGeneratorHistory((prev) => {
+      if (prev.length === 0) return prev;
+      const next = [...prev];
+      next[next.length - 1] = {
+        ...next[next.length - 1],
+        feedback: trimmed.length > 0 ? trimmed : undefined
+      };
+      return next;
+    });
+    setLatestFeedback('');
+    setFeedbackSavedAt(Date.now());
   };
 
   const runTranslation = async () => {
@@ -491,7 +541,49 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   <textarea readOnly value={generatorPreview} rows={8} style={{width:'100%', fontFamily:'var(--font-mono, monospace)'}} />
                 </div>
               )}
+              {generatorHistory.length > 0 && (
+                <div style={{marginTop:12, display:'flex', flexDirection:'column', gap:12}}>
+                  <div>
+                    <div className="label" style={{marginBottom:4}}>{t('llmConversationHistory')}</div>
+                    <div className="small" style={{color:'var(--text-muted)'}}>{t('llmConversationHistoryHint')}</div>
+                  </div>
+                  <div style={{display:'flex', flexDirection:'column', gap:8, maxHeight:220, overflowY:'auto'}}>
+                    {generatorHistory.map((turn, idx) => (
+                      <div key={turn.timestamp} style={{border:'1px solid var(--border)', borderRadius:8, padding:8, display:'flex', flexDirection:'column', gap:6}}>
+                        <div className="small" style={{fontWeight:600}}>{t('llmTurnLabel', { index: idx + 1 })}</div>
+                        <div className="small" style={{whiteSpace:'pre-wrap'}}>
+                          <strong>{t('llmPromptLabel')}:</strong>{' '}
+                          {turn.prompt || t('llmEmptyValue')}
+                        </div>
+                        <div className="small" style={{whiteSpace:'pre-wrap'}}>
+                          <strong>{t('llmResponseLabel')}:</strong>{' '}
+                          {turn.response || t('llmEmptyValue')}
+                        </div>
+                        <div className="small" style={{whiteSpace:'pre-wrap'}}>
+                          <strong>{t('llmUserFeedbackLabel')}:</strong>{' '}
+                          {turn.feedback || t('llmEmptyValue')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="label" style={{marginBottom:4}}>{t('llmUserFeedbackLabel')}</div>
+                    <textarea
+                      value={latestFeedback}
+                      onChange={(e)=> setLatestFeedback(e.target.value)}
+                      rows={3}
+                      placeholder={t('llmFeedbackPlaceholder')}
+                      disabled={generatorHistory.length === 0}
+                    />
+                    <div className="row" style={{justifyContent:'flex-end', gap:8, alignItems:'center', marginTop:6, flexWrap:'wrap'}}>
+                      <button type="button" onClick={handleSubmitFeedback} disabled={generatorHistory.length === 0}>{t('llmSubmitFeedback')}</button>
+                      {feedbackSavedAt && <span className="small" style={{color:'var(--text-muted)'}}>{t('saved')}</span>}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+            <hr className="div" style={{margin:'12px 0'}} />
             <div>
               <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
                 <div className="label" style={{margin:0}}>{t('translationHelper')}</div>
@@ -528,7 +620,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 <button type="button" onClick={()=> translationOutput && update({ answer: translationOutput })}>{t('translationApplyAnswer')}</button>
               </div>
             </div>
-            <hr className="div" style={{margin:'0'}} />
+            <hr className="div" style={{margin:'12px 0'}} />
             <div>
               <div className="label">{t('uploadImage')}</div>
               <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>

@@ -1,13 +1,22 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
+export interface GeneratorConversationTurn {
+  prompt: string;
+  response: string;
+  feedback?: string;
+}
+
 export async function generateProblemFromText(
   input: string,
   existing: ProblemRecord,
   agent: LLMAgentSettings,
   defaults: DefaultSettings,
-  handlers?: { onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void }
-): Promise<Partial<ProblemRecord>> {
+  options?: {
+    onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
+    conversation?: GeneratorConversationTurn[];
+  }
+): Promise<{ patch: Partial<ProblemRecord>; raw: string }> {
   const baseInput = input.trim();
   const sanitizedInput = baseInput || '(no additional source text)';
   const targetType = existing.questionType;
@@ -71,10 +80,28 @@ export async function generateProblemFromText(
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
   user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
 
+  const conversation = options?.conversation ?? [];
+  if (conversation.length > 0) {
+    user += '\nConversation history (oldest first). Use prior feedback to refine the next draft.\n';
+    conversation.forEach((turn, idx) => {
+      const prompt = turn.prompt?.trim() || '(empty)';
+      const response = turn.response?.trim() || '(empty)';
+      const feedback = turn.feedback?.trim();
+      user += `Round ${idx + 1}:\n`;
+      user += `Prompt:\n${prompt}\n`;
+      user += `Model reply:\n${response}\n`;
+      if (feedback) {
+        user += `User feedback:\n${feedback}\n`;
+      }
+      user += '\n';
+    });
+    user += 'Incorporate all constructive feedback points while keeping improvements cumulative.\n';
+  }
+
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: user }
-  ], agent.config, { temperature: 0.2 }, handlers);
+  ], agent.config, { temperature: 0.2 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
 
   const jsonMarker = raw.indexOf('JSON:');
   if (jsonMarker === -1) {
@@ -180,7 +207,7 @@ export async function generateProblemFromText(
       ? String(obj.difficulty)
       : existingDifficulty || fallbackDifficulty;
 
-  const partial: Partial<ProblemRecord> = {
+  const patch: Partial<ProblemRecord> = {
     question,
     questionType,
     options: normalizedOptions,
@@ -189,5 +216,5 @@ export async function generateProblemFromText(
     academicLevel,
     difficulty
   };
-  return partial;
+  return { patch, raw };
 }
