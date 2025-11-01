@@ -1,5 +1,6 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
+import { jsonrepair } from 'jsonrepair';
 
 const JSON_STRING_REGEX = /"([^"\\]*(?:\\.[^"\\]*)*)"/gs;
 
@@ -236,6 +237,17 @@ export async function generateProblemFromText(
         break;
       } catch (candidateError) {
         lastError = candidateError;
+      }
+    }
+    if (typeof obj === 'undefined') {
+      try {
+        const repairedText = jsonrepair(jsonText);
+        obj = JSON.parse(repairedText);
+        jsonText = repairedText;
+        console.warn('Recovered JSON via jsonrepair fallback');
+        lastError = undefined;
+      } catch (repairError) {
+        lastError = repairError;
       }
     }
     if (typeof obj === 'undefined') {
