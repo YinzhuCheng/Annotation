@@ -46,6 +46,36 @@ const buildJsonRepairCandidates = (original: string): string[] => {
   return Array.from(candidates);
 };
 
+const decodeBase64ToString = (input: string): string => {
+  const normalized = input.replace(/\s+/g, '');
+  if (!normalized) return '';
+  try {
+    if (typeof atob === 'function') {
+      const binary = atob(normalized);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+  } catch (error) {
+    console.warn('Base64 decode via atob failed, attempting Buffer fallback', error);
+  }
+  try {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(normalized, 'base64').toString('utf-8');
+    }
+  } catch (error) {
+    console.warn('Base64 decode via Buffer failed', error);
+  }
+  return input;
+};
+
+const decodeTextField = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const decoded = decodeBase64ToString(trimmed);
+  return decoded || trimmed;
+};
+
 export interface GeneratorConversationTurn {
   prompt: string;
   response: string;
@@ -140,6 +170,8 @@ export async function generateProblemFromText(
   user += '   - All JSON strings must escape backslashes, quotes, and control characters using standard JSON escaping (e.g., \\theta, \\n).\n';
   user += '   - Do not wrap the JSON or any string fields in LaTeX math delimiters such as $...$ or \\(...\\). Provide raw JSON only.\n';
   user += '   - Example: write the LaTeX fraction 1/2 as "\\\\frac{1}{2}" inside the JSON; writing "\\frac{1}{2}" will be rejected as invalid JSON.\n';
+  user += '   - Encode the values of "question", "answer", "subfield", "academicLevel", "difficulty", and every entry inside "options" using standard Base64 (UTF-8) before placing them in the JSON.\n';
+  user += '   - Generate the Base64 from the original LaTeX/plaintext without adding extra escapes, so that decoding the Base64 yields the exact wording you intend the user to see.\n';
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
@@ -218,18 +250,18 @@ export async function generateProblemFromText(
     ? (llmQuestionTypeRaw as ProblemRecord['questionType'])
     : targetType;
 
-  const llmQuestion = typeof obj.question === 'string' ? obj.question.trim() : '';
-  const question = llmQuestion || existingQuestion || baseInput;
+  const questionDecoded = decodeTextField(obj.question);
+  const question = questionDecoded || existingQuestion || baseInput;
 
   const rawOptions = (obj as any)?.options;
   const llmOptions: string[] = (() => {
     if (Array.isArray(rawOptions)) {
-      return rawOptions.map((o: any) => String(o ?? '').trim());
+      return rawOptions.map((o: any) => decodeTextField(o).trim());
     }
     if (rawOptions && typeof rawOptions === 'object') {
       return Object.entries(rawOptions as Record<string, unknown>)
         .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-        .map(([, value]) => String(value ?? '').trim());
+        .map(([, value]) => decodeTextField(value).trim());
     }
     if (typeof rawOptions === 'string') {
       const lines = rawOptions
@@ -237,7 +269,7 @@ export async function generateProblemFromText(
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
       if (lines.length > 0) {
-        return lines.map((line) => line.replace(/^[A-Z][\.\)]?\s*/i, '').trim());
+        return lines.map((line) => decodeTextField(line.replace(/^[A-Z][\.\)]?\s*/i, '').trim()));
       }
     }
     return [];
@@ -253,23 +285,23 @@ export async function generateProblemFromText(
 
   let answer = '';
   if (typeof obj.answer === 'string') {
-    answer = obj.answer.trim();
+    answer = decodeTextField(obj.answer);
   } else if (Array.isArray(obj.answer)) {
-    answer = JSON.stringify(obj.answer);
+    answer = obj.answer.map((entry: unknown) => decodeTextField(entry)).filter((entry) => entry.length > 0).join('\n');
   }
   if (!answer) {
     answer = existingAnswer || '';
   }
 
   const fallbackSubfield = defaults.subfieldOptions[0] ?? 'Others';
-  const subfield = (typeof obj.subfield === 'string' ? obj.subfield.trim() : '') || existingSubfield || fallbackSubfield;
+  const subfield = decodeTextField(obj.subfield) || existingSubfield || fallbackSubfield;
 
   const fallbackAcademic = defaults.academicLevels[0] ?? 'K12';
-  const academicLevel = (typeof obj.academicLevel === 'string' ? obj.academicLevel.trim() : '') || existingAcademic || fallbackAcademic;
+  const academicLevel = decodeTextField(obj.academicLevel) || existingAcademic || fallbackAcademic;
 
   const fallbackDifficulty = defaults.difficultyOptions[0] ?? '1';
   const difficulty = typeof obj.difficulty === 'string'
-    ? obj.difficulty.trim() || existingDifficulty || fallbackDifficulty
+    ? decodeTextField(obj.difficulty) || existingDifficulty || fallbackDifficulty
     : typeof obj.difficulty === 'number'
       ? String(obj.difficulty)
       : existingDifficulty || fallbackDifficulty;
