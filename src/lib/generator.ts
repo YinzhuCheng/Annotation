@@ -67,7 +67,7 @@ export async function generateProblemFromText(
   } else {
     user += '   - Non-multiple-choice question types must set "options" to an empty array [].\n';
   }
-  user += '   - Fill-in-the-blank: insert explicit blanks such as "___". When the source only asserts existence, ask for a concrete witness or numerical property, and supply those exact values in the answer (use an ordered JSON array like ["4","9"] if multiple blanks exist).\n';
+  user += '   - Fill-in-the-blank: insert exactly one explicit blank such as "___". When the source only asserts existence, ask for a single concrete witness or numerical property that fills that blank, and return the answer as a single consistent string (e.g., "4").\n';
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
   user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
 

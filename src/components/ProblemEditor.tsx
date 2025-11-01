@@ -448,7 +448,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </select>
               </div>
               <div>
-              <div className="label">{difficultyLabelDisplay}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
+                <div className="label">{difficultyLabelDisplay}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
                 <select value={current.difficulty} onChange={(e)=> update({ difficulty: e.target.value })}>
                   {difficultySelectOptions.map((option) => (
                     <option key={option} value={option}>{option}</option>
@@ -456,7 +456,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </select>
               </div>
               <div className="row" style={{alignItems:'flex-end', justifyContent:'flex-end'}}>
-                <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
+                {/* intentionally left blank to balance layout */}
               </div>
             </div>
           </div>
