@@ -417,5 +417,20 @@ export async function generateProblemFromText(
     academicLevel,
     difficulty
   };
+  const missing: string[] = [];
+  if (!question) missing.push('question');
+  if (!questionType) missing.push('questionType');
+  if (!answer) missing.push('answer');
+  if (!subfield) missing.push('subfield');
+  if (!academicLevel) missing.push('academicLevel');
+  if (!difficulty) missing.push('difficulty');
+  if (questionType === 'Multiple Choice' && normalizedOptions.some((opt) => !opt || !opt.trim())) {
+    missing.push('options');
+  }
+  if (missing.length > 0) {
+    const message = `Failed to parse LLM response: missing or invalid fields: ${missing.join(', ')}`;
+    throw new LLMGenerationError(message, jsonText);
+  }
+
   return { patch, raw };
 }
