@@ -32,7 +32,7 @@ export function LLMConfig() {
   const [overallSavedAt, setOverallSavedAt] = useState<number | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<PromptEditorState>(null);
   const [testMsg, setTestMsg] = useState('');
-  const [testAgentId, setTestAgentId] = useState<AgentId>('generator');
+  const [testAgentId, setTestAgentId] = useState<'overall' | AgentId>('overall');
   const [reply, setReply] = useState('');
   const [err, setErr] = useState('');
   const [status, setStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
@@ -150,7 +150,20 @@ export function LLMConfig() {
 
   const handleSaveOverall = () => {
     const now = Date.now();
-    agentIds.forEach((id) => saveAgentSettings(id, drafts[id]));
+    const unifiedConfig = { ...overallConfig.config };
+    agentIds.forEach((id) => {
+      const draft = drafts[id];
+      if (!draft) return;
+      saveAgentSettings(id, { ...draft, config: { ...unifiedConfig } });
+    });
+    setDrafts((prev) => {
+      const next = { ...prev } as Record<AgentId, LLMAgentSettings>;
+      agentIds.forEach((id) => {
+        if (!next[id]) return;
+        next[id] = { ...next[id], config: { ...unifiedConfig } };
+      });
+      return next;
+    });
     setSavedAt((prev) => {
       const next = { ...prev };
       agentIds.forEach((id) => { next[id] = now; });
@@ -159,10 +172,11 @@ export function LLMConfig() {
     setOverallSavedAt(now);
   };
 
-  const ensureConfig = (id: AgentId): boolean => {
-    const cfg = drafts[id]?.config;
+  const ensureConfig = (target: 'overall' | AgentId): boolean => {
+    const cfg = target === 'overall' ? overallConfig.config : drafts[target]?.config;
     if (!cfg?.apiKey?.trim() || !cfg?.model?.trim() || !cfg?.baseUrl?.trim()) {
-      setErr(t('llmAgentMissingBody', { agent: agentTitles[id] }));
+      const agentName = target === 'overall' ? t('llmGlobalSettings') : agentTitles[target];
+      setErr(t('llmAgentMissingBody', { agent: agentName }));
       setStatus('done');
       return false;
     }
@@ -174,8 +188,11 @@ export function LLMConfig() {
     setReply('');
     setStatus('idle');
     if (!ensureConfig(testAgentId)) return;
+    const configToUse = testAgentId === 'overall'
+      ? { ...overallConfig.config }
+      : drafts[testAgentId].config;
     try {
-      await chatStream([{ role: 'user', content: testMsg }], drafts[testAgentId].config, undefined, {
+      await chatStream([{ role: 'user', content: testMsg }], configToUse, undefined, {
         onStatus: (s) => setStatus(s),
         onToken: (tok) => setReply((prevTok) => prevTok + tok)
       });
@@ -206,7 +223,7 @@ export function LLMConfig() {
           </div>
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
             {overallSavedAt && <span className="badge">{t('saved')}</span>}
-            <button type="button" className="primary" onClick={handleSaveOverall}>{t('save')}</button>
+            <button type="button" className="primary" onClick={handleSaveOverall}>{t('confirm')}</button>
           </div>
         </div>
 
@@ -337,7 +354,8 @@ export function LLMConfig() {
       <hr className="div" />
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(140px, 220px) 1fr auto', gap: 8 }}>
-        <select value={testAgentId} onChange={(e) => setTestAgentId(e.target.value as AgentId)}>
+        <select value={testAgentId} onChange={(e) => setTestAgentId(e.target.value as 'overall' | AgentId)}>
+          <option value="overall">{t('llmTestOverall')}</option>
           {agentDefs.map((def) => (
             <option key={def.id} value={def.id}>{def.title}</option>
           ))}
@@ -345,6 +363,7 @@ export function LLMConfig() {
         <input placeholder={t('yourMessage')} value={testMsg} onChange={(e)=> setTestMsg(e.target.value)} />
         <button type="button" onClick={handleTest}>{t('testLLM')}</button>
       </div>
+      <div className="small" style={{ marginTop: 4, color: 'var(--text-muted)' }}>{t('llmTestNotice')}</div>
       {(reply || err || (status !== 'idle' && status !== 'done')) && (
         <div className="card" style={{marginTop:8}}>
           {(status !== 'idle' && status !== 'done') && (

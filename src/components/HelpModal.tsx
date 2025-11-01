@@ -72,8 +72,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <h5 style={{margin:'0 0 8px 0'}}>LLM Agents</h5>
                 <ul className="list">
                   <li><strong>OCR Agent:</strong> Extracts text from uploaded images with a vision-capable model.</li>
-                  <li><strong>Translation Agent:</strong> Converts questions or answers between English and Chinese while preserving notation.</li>
-                  <li><strong>LaTeX Correction Agent:</strong> Normalizes mathematical expressions into consistent LaTeX.</li>
+                  <li><strong>Translation Agent:</strong> Converts questions or answers between English and Chinese while preserving MathJax-compatible notation.</li>
+                  <li><strong>LaTeX Correction Agent:</strong> Normalizes mathematical expressions into MathJax-safe LaTeX.</li>
                   <li><strong>Problem Generation Agent:</strong> Crafts structured problems, answers, and metadata from prompts.</li>
                 </ul>
               </div>
@@ -94,8 +94,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <h5 style={{margin:'0 0 8px 0'}}>LLM 代理说明</h5>
                 <ul className="list">
                   <li><strong>OCR 代理：</strong> 借助具备视觉能力的模型读取截图文字。</li>
-                  <li><strong>翻译代理：</strong> 在中英文之间转换题目或答案，保持数学符号与 LaTeX 不变。</li>
-                  <li><strong>LaTeX 校正代理：</strong> 统一数学表达式的 LaTeX 写法。</li>
+                  <li><strong>翻译代理：</strong> 在中英文之间转换题目或答案，保持符号及 LaTeX（兼容 MathJax）一致。</li>
+                  <li><strong>LaTeX 校正代理：</strong> 统一数学表达式并确保输出符合 MathJax 的 LaTeX 语法。</li>
                   <li><strong>题目生成代理：</strong> 将提示加工为完整的题目、答案及元数据。</li>
                 </ul>
               </div>
