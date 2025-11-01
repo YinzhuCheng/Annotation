@@ -18,8 +18,26 @@ export async function chatStream(
     body: JSON.stringify({ messages, llm, extra })
   });
   if (!res.ok) {
-    const text = await res.text().catch(()=> '');
-    throw new Error(`LLM error ${res.status}: ${text}`);
+    const rawText = await res.text().catch(() => '');
+    let extracted = rawText.trim();
+    if (extracted) {
+      try {
+        const parsed = JSON.parse(extracted);
+        const payload = parsed?.error ?? parsed?.message ?? parsed;
+        if (typeof payload === 'string') {
+          extracted = payload;
+        } else if (payload && typeof payload === 'object') {
+          const message = payload?.message ?? payload?.error ?? '';
+          const code = payload?.code ?? payload?.type ?? '';
+          const suffix = [code, message].filter(Boolean).join(': ');
+          extracted = suffix || JSON.stringify(payload);
+        }
+      } catch {
+        // keep trimmed raw text
+      }
+    }
+    const suffix = extracted ? `: ${extracted}` : '';
+    throw new Error(`LLM error ${res.status}${suffix}`);
   }
   const reader = res.body?.getReader();
   if (!reader) {
@@ -51,6 +69,29 @@ export async function chatStream(
         if (data === '[DONE]') { handlers?.onStatus?.('done'); break; }
         try {
           const j = JSON.parse(data);
+          const errPayload = j?.error;
+          if (errPayload) {
+            let errMessage = '';
+            let errType = '';
+            let errCode = '';
+            if (typeof errPayload === 'string') {
+              errMessage = errPayload;
+            } else if (typeof errPayload === 'object') {
+              errMessage = String(errPayload?.message ?? errPayload?.error ?? '');
+              errType = errPayload?.type ? String(errPayload.type) : '';
+              errCode = errPayload?.code ? String(errPayload.code) : '';
+              if (!errMessage && Object.keys(errPayload).length > 0) {
+                errMessage = JSON.stringify(errPayload);
+              }
+            }
+            const detailParts = [errType, errCode].filter(Boolean).join(' · ');
+            const detail = detailParts ? `${detailParts} — ${errMessage}`.trim() : errMessage;
+            handlers?.onStatus?.('done');
+            try {
+              await reader.cancel();
+            } catch {}
+            throw new Error(`LLM provider error: ${detail || 'Unknown error'}`);
+          }
           const delta = j?.choices?.[0]?.delta || j?.choices?.[0]?.message || {};
           const content = delta?.content || '';
           if (content) {
