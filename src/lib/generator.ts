@@ -1,6 +1,51 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
+const JSON_STRING_REGEX = /"([^"\\]*(?:\\.[^"\\]*)*)"/gs;
+
+const escapeBareBackslashes = (text: string): string =>
+  text.replace(/(?<!\\)\\(?!["\\\/bfnrtu])/g, '\\\\');
+
+const escapeStringControlCharacters = (text: string): string =>
+  text.replace(JSON_STRING_REGEX, (match, inner) => {
+    const sanitized = inner.replace(/[\u0000-\u001F]/g, (char) => {
+      switch (char) {
+        case '\b':
+          return '\\b';
+        case '\f':
+          return '\\f';
+        case '\n':
+          return '\\n';
+        case '\r':
+          return '\\r';
+        case '\t':
+          return '\\t';
+        default: {
+          const code = char.charCodeAt(0).toString(16).padStart(4, '0');
+          return `\\u${code}`;
+        }
+      }
+    });
+    return `"${sanitized}"`;
+  });
+
+const buildJsonRepairCandidates = (original: string): string[] => {
+  const candidates = new Set<string>();
+  const push = (value: string) => {
+    if (value && !candidates.has(value)) candidates.add(value);
+  };
+
+  push(original);
+  const backslashEscaped = escapeBareBackslashes(original);
+  push(backslashEscaped);
+  push(escapeStringControlCharacters(original));
+  push(escapeStringControlCharacters(backslashEscaped));
+  const trimmed = original.trim();
+  if (trimmed !== original) push(trimmed);
+
+  return Array.from(candidates);
+};
+
 export interface GeneratorConversationTurn {
   prompt: string;
   response: string;
@@ -94,6 +139,7 @@ export async function generateProblemFromText(
   user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
   user += '   - All JSON strings must escape backslashes, quotes, and control characters using standard JSON escaping (e.g., \\theta, \\n).\n';
   user += '   - Do not wrap the JSON or any string fields in LaTeX math delimiters such as $...$ or \\(...\\). Provide raw JSON only.\n';
+  user += '   - Example: write the LaTeX fraction 1/2 as "\\\\frac{1}{2}" inside the JSON; writing "\\frac{1}{2}" will be rejected as invalid JSON.\n';
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
@@ -144,39 +190,25 @@ export async function generateProblemFromText(
   let obj: any;
   try {
     obj = JSON.parse(jsonText);
-  } catch (error) {
-    const repaired = jsonText.replace(/(?<!\\)\\(?!["\\\/bfnrtu])/g, '\\\\');
-    if (repaired !== jsonText) {
+  } catch (initialError) {
+    const candidates = buildJsonRepairCandidates(jsonText);
+    let lastError: unknown = initialError;
+    for (const candidate of candidates) {
       try {
-        obj = JSON.parse(repaired);
-        jsonText = repaired;
-        console.warn('Recovered JSON by escaping invalid backslashes');
-      } catch (innerError) {
-        const repairedNewlines = repaired.replace(/\\\n/g, '\\n');
-        try {
-          obj = JSON.parse(repairedNewlines);
-          jsonText = repairedNewlines;
-          console.warn('Recovered JSON by escaping invalid backslashes and newlines');
-        } catch (finalError) {
-          console.error('Failed to parse repaired LLM JSON response', finalError, repairedNewlines);
-          throw new LLMGenerationError('Failed to parse repaired LLM JSON response', raw, finalError);
+        obj = JSON.parse(candidate);
+        if (candidate !== jsonText) {
+          console.warn('Recovered JSON using auto-escape repair');
+          jsonText = candidate;
         }
+        lastError = undefined;
+        break;
+      } catch (candidateError) {
+        lastError = candidateError;
       }
-    } else {
-      const escapedNewlines = jsonText.replace(/\\\n/g, '\\n');
-      if (escapedNewlines !== jsonText) {
-        try {
-          obj = JSON.parse(escapedNewlines);
-          jsonText = escapedNewlines;
-          console.warn('Recovered JSON by escaping newline sequences');
-        } catch (innerMostError) {
-          console.error('Failed to parse LLM JSON response', innerMostError, escapedNewlines);
-          throw new LLMGenerationError('Failed to parse LLM JSON response', raw, innerMostError);
-        }
-      } else {
-        console.error('Failed to parse LLM JSON response', error, jsonText);
-        throw new LLMGenerationError('Failed to parse LLM JSON response', raw, error);
-      }
+    }
+    if (typeof obj === 'undefined') {
+      console.error('Failed to parse repaired LLM JSON response', lastError, candidates);
+      throw new LLMGenerationError('Failed to parse repaired LLM JSON response', raw, lastError);
     }
   }
 
