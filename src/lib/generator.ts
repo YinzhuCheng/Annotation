@@ -12,10 +12,53 @@ interface ParsedGeneratedQuestion {
 }
 
 const extractTagContent = (source: string, rawTag: string): string | null => {
-  const tagPattern = rawTag.replace(/\s+/g, '\\s+');
-  const regex = new RegExp(`<${tagPattern}>\\s*{{([\\s\\S]*?)}}`, 'i');
-  const match = regex.exec(source);
-  return match ? match[1].trim() : null;
+  if (!source) return null;
+
+  const openTag = `<${rawTag}>`;
+  const closeTag = `</${rawTag}>`;
+  const lowerSource = source.toLowerCase();
+  const lowerOpen = openTag.toLowerCase();
+  const lowerClose = closeTag.toLowerCase();
+
+  const openIndex = lowerSource.indexOf(lowerOpen);
+  if (openIndex === -1) return null;
+
+  const contentStart = openIndex + openTag.length;
+  const closeIndex = lowerSource.indexOf(lowerClose, contentStart);
+  if (closeIndex === -1) return null;
+
+  const inner = source.slice(contentStart, closeIndex);
+  const leadingTrimmed = inner.replace(/^\s*/, '');
+  const trailingTrimmed = leadingTrimmed.replace(/\s*$/, '');
+
+  const startBraceIndex = trailingTrimmed.indexOf('{{');
+  if (startBraceIndex === -1) {
+    return trailingTrimmed.trim() || null;
+  }
+
+  const contentStartIndex = startBraceIndex + 2;
+
+  const findClosingBraces = (): number => {
+    let searchIndex = trailingTrimmed.length;
+    while (searchIndex >= contentStartIndex + 2) {
+      const candidate = trailingTrimmed.lastIndexOf('}}', searchIndex);
+      if (candidate === -1) return -1;
+      const afterCandidate = trailingTrimmed.slice(candidate + 2);
+      if (afterCandidate.trim().length === 0) {
+        return candidate;
+      }
+      searchIndex = candidate - 1;
+    }
+    return -1;
+  };
+
+  const endBraceIndex = findClosingBraces();
+  if (endBraceIndex === -1 || endBraceIndex < contentStartIndex) {
+    return trailingTrimmed.slice(contentStartIndex).trim() || null;
+  }
+
+  const between = trailingTrimmed.slice(contentStartIndex, endBraceIndex);
+  return between.trim() || null;
 };
 
 const normalizeKey = (input: string): string => input
@@ -30,7 +73,7 @@ const cleanOptionText = (fragment: string): string | null => {
   text = text.replace(/^[-?*?]+\s*/, '').trim();
   if (/^\(none\)$/i.test(text) || /^none$/i.test(text)) return null;
   if (/<option text>/i.test(text) || /<value>/i.test(text)) return null;
-  const labeled = text.match(/^([A-Z])[)\.-:]\s*(.*)$/);
+  const labeled = text.match(/^([A-Z])[)\.-:]\s*([\s\S]*)$/);
   if (labeled) {
     const body = labeled[2].trim();
     return body || labeled[1];
@@ -39,8 +82,29 @@ const cleanOptionText = (fragment: string): string | null => {
 };
 
 const addOptionFragment = (fragment: string, target: string[]) => {
-  const option = cleanOptionText(fragment);
-  if (option) target.push(option);
+  if (!fragment) return;
+  let text = fragment.trim();
+  if (!text) return;
+
+  if (/^\(none\)$/i.test(text) || /^none$/i.test(text)) return;
+  if (/<option text>/i.test(text) || /<value>/i.test(text)) return;
+
+  const labeled = text.match(/^([A-Z])[)\.-:]\s*([\s\S]*)$/);
+  if (labeled) {
+    const body = cleanOptionText(text);
+    if (body) target.push(body);
+    return;
+  }
+
+  text = text.replace(/^[-*]+\s*/, '').trim();
+  if (!text) return;
+
+  if (target.length === 0) {
+    target.push(text);
+  } else {
+    const combined = `${target[target.length - 1]}\n${text}`.trim();
+    target[target.length - 1] = combined;
+  }
 };
 
 const parseOptionValue = (value: string, target: string[]) => {
@@ -171,7 +235,14 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   if (optionsSection.length === 1 && /^\s*\(none\)\s*$/i.test(optionsSection[0])) {
     // explicit none
   } else if (optionsSection.length > 0) {
-    optionsSection.forEach((line) => parseOptionValue(line, options));
+    const block = optionsSection.join('\n').replace(/\r/g, '').trim();
+    if (block && !/^\(none\)$/i.test(block)) {
+      const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
+      segments.forEach((segment) => addOptionFragment(segment, options));
+      if (options.length === 0) {
+        parseOptionValue(block, options);
+      }
+    }
   }
 
   const typeHeader = getHeader('x-question-type')
