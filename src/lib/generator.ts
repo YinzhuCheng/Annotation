@@ -1,224 +1,135 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
-type RawValueType = 'string' | 'array' | 'object' | 'primitive';
-
-interface RawValueResult {
-  type: RawValueType;
-  value?: string;
-  raw?: string;
-  endIndex: number;
+interface ParsedGeneratedQuestion {
+  question: string;
+  questionType: string;
+  options: string[];
+  answer: string;
+  subfield: string;
+  academicLevel: string;
+  difficulty: string;
 }
 
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const extractTagContent = (source: string, rawTag: string): string | null => {
+  const tagPattern = rawTag.replace(/\s+/g, '\\s+');
+  const regex = new RegExp(`<${tagPattern}>\\s*{{([\\s\\S]*?)}}`, 'i');
+  const match = regex.exec(source);
+  return match ? match[1].trim() : null;
+};
 
-const decodeEscapeSequence = (char: string): string => {
-  switch (char) {
-    case '"':
-      return '"';
-    case '\\':
-      return '\\';
-    case '/':
-      return '/';
-    case 'b':
-      return '\b';
-    case 'f':
-      return '\f';
-    case 'n':
-      return '\n';
-    case 'r':
-      return '\r';
-    case 't':
-      return '\t';
-    default:
-      return char;
+const cleanOptionText = (fragment: string): string | null => {
+  if (!fragment) return null;
+  let text = fragment.trim();
+  if (!text) return null;
+  text = text.replace(/^[-?*?]+\s*/, '').trim();
+  if (/^\(none\)$/i.test(text) || /^none$/i.test(text)) return null;
+  if (/<option text>/i.test(text) || /<value>/i.test(text)) return null;
+  const labeled = text.match(/^([A-Z])[)\.-:]\s*(.*)$/);
+  if (labeled) {
+    const body = labeled[2].trim();
+    return body || labeled[1];
+  }
+  return text;
+};
+
+const addOptionFragment = (fragment: string, target: string[]) => {
+  const option = cleanOptionText(fragment);
+  if (option) target.push(option);
+};
+
+const parseOptionValue = (value: string, target: string[]) => {
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  if (/^\(none\)$/i.test(trimmed) || /^none$/i.test(trimmed)) return;
+  const splitByLabel = trimmed.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
+  if (splitByLabel.length > 0) {
+    splitByLabel.forEach((part) => addOptionFragment(part, target));
+    return;
+  }
+  trimmed.split(/;|\|/).forEach((part) => addOptionFragment(part, target));
+  if (!trimmed.includes(';') && !trimmed.includes('|')) {
+    addOptionFragment(trimmed, target);
   }
 };
 
-const readStringLiteral = (
-  text: string,
-  startIndex: number
-): { value: string; endIndex: number; raw: string } => {
-  let i = startIndex + 1;
-  let value = '';
-  let raw = '"';
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === '\\') {
-      if (i + 1 >= text.length) break;
-      const next = text[i + 1];
-      raw += '\\' + next;
-      if (next === 'u' && i + 5 < text.length) {
-        const hex = text.substr(i + 2, 4);
-        raw += hex;
-        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
-          value += String.fromCharCode(parseInt(hex, 16));
-          i += 6;
-          continue;
-        }
+const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion => {
+  const result: ParsedGeneratedQuestion = {
+    question: '',
+    questionType: '',
+    options: [],
+    answer: '',
+    subfield: '',
+    academicLevel: '',
+    difficulty: ''
+  };
+
+  const lines = content.split(/\r?\n/).map((line) => line.trim());
+  let currentField: 'question' | 'options' | null = null;
+
+  for (const line of lines) {
+    if (!line) continue;
+
+    const kvMatch = line.match(/^([A-Za-z ]+)\s*:\s*(.*)$/);
+    if (kvMatch) {
+      const key = kvMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+      const value = kvMatch[2].trim();
+
+      switch (key) {
+        case 'question':
+          result.question = value;
+          currentField = 'question';
+          break;
+        case 'questiontype':
+        case 'type':
+          result.questionType = value;
+          currentField = null;
+          break;
+        case 'options':
+          if (/^\(none\)$/i.test(value) || /^none$/i.test(value)) {
+            currentField = null;
+          } else {
+            currentField = 'options';
+            if (value) parseOptionValue(value, result.options);
+          }
+          break;
+        case 'answer':
+          result.answer = value;
+          currentField = null;
+          break;
+        case 'subfield':
+        case 'subfields':
+          result.subfield = value;
+          currentField = null;
+          break;
+        case 'academiclevel':
+        case 'academic':
+          result.academicLevel = value;
+          currentField = null;
+          break;
+        case 'difficulty':
+          result.difficulty = value;
+          currentField = null;
+          break;
+        default:
+          currentField = null;
       }
-      value += decodeEscapeSequence(next);
-      i += 2;
       continue;
     }
-    if (ch === '"') {
-      raw += '"';
-      return { value, endIndex: i + 1, raw };
-    }
-    raw += ch;
-    value += ch;
-    i++;
-  }
-  return { value, endIndex: startIndex + 1, raw };
-};
 
-const readCollection = (
-  text: string,
-  startIndex: number,
-  openChar: string,
-  closeChar: string
-): { raw: string; endIndex: number } => {
-  let i = startIndex;
-  let depth = 0;
-  let raw = '';
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === '"') {
-      const str = readStringLiteral(text, i);
-      raw += str.raw;
-      i = str.endIndex;
+    if (currentField === 'question') {
+      result.question = `${result.question} ${line}`.trim();
       continue;
     }
-    raw += ch;
-    if (ch === openChar) {
-      depth++;
-    } else if (ch === closeChar) {
-      depth--;
-      i++;
-      if (depth === 0) {
-        break;
-      }
-      continue;
+
+    if (currentField === 'options' || /^[A-Z][)\.-:]/.test(line)) {
+      addOptionFragment(line, result.options);
+      currentField = 'options';
     }
-    i++;
   }
-  return { raw, endIndex: i };
-};
 
-const findRawValue = (source: string, key: string): RawValueResult | null => {
-  const keyRegex = new RegExp(`"${escapeRegExp(key)}"\\s*:\\s*`, 'i');
-  const match = keyRegex.exec(source);
-  if (!match) return null;
-  let idx = match.index + match[0].length;
-  const len = source.length;
-  while (idx < len && /\s/.test(source[idx])) idx++;
-  if (idx >= len) return null;
-  const first = source[idx];
-  if (first === '"') {
-    const result = readStringLiteral(source, idx);
-    return { type: 'string', value: result.value, endIndex: result.endIndex };
-  }
-  if (first === '[') {
-    const collection = readCollection(source, idx, '[', ']');
-    return { type: 'array', raw: collection.raw, endIndex: collection.endIndex };
-  }
-  if (first === '{') {
-    const collection = readCollection(source, idx, '{', '}');
-    return { type: 'object', raw: collection.raw, endIndex: collection.endIndex };
-  }
-  let end = idx;
-  while (end < len && !/[,}\n\r]/.test(source[end])) end++;
-  const value = source.slice(idx, end).trim();
-  return { type: 'primitive', value, endIndex: end };
+  return result;
 };
-
-const decodeEscapedString = (input: string): string => {
-  const synthetic = `"${input}"`;
-  const result = readStringLiteral(synthetic, 0);
-  return result.value;
-};
-
-const extractStringValueLoose = (source: string, key: string): string => {
-  const found = findRawValue(source, key);
-  if (!found) return '';
-  if (found.type === 'string') {
-    return (found.value ?? '').trim();
-  }
-  if (found.type === 'primitive') {
-    return (found.value ?? '').trim().replace(/,$/, '');
-  }
-  return (found.raw ?? '').trim();
-};
-
-const parseArrayStrings = (raw: string): string[] => {
-  const text = raw.trim();
-  if (!text.startsWith('[')) return [];
-  const values: string[] = [];
-  let i = 1;
-  const len = text.length;
-  while (i < len - 1) {
-    while (i < len && /[\s,]/.test(text[i])) i++;
-    if (i >= len - 1) break;
-    const ch = text[i];
-    if (ch === '"') {
-      const str = readStringLiteral(text, i);
-      values.push(str.value.trim());
-      i = str.endIndex;
-      continue;
-    }
-    if (ch === '[' || ch === '{') {
-      const nested = readCollection(text, i, ch, ch === '[' ? ']' : '}');
-      i = nested.endIndex;
-      continue;
-    }
-    let j = i;
-    while (j < len && text[j] !== ',' && text[j] !== ']') j++;
-    const token = text.slice(i, j).trim();
-    if (token) values.push(token);
-    i = j;
-  }
-  return values;
-};
-
-const parseObjectStringValues = (raw: string): string[] => {
-  const text = raw.trim();
-  if (!text.startsWith('{')) return [];
-  const values: string[] = [];
-  const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    values.push(decodeEscapedString(match[2]).trim());
-  }
-  return values;
-};
-
-const extractOptionsLoose = (source: string): string[] => {
-  const found = findRawValue(source, 'options');
-  if (!found) return [];
-  if (found.type === 'array' && found.raw) {
-    return parseArrayStrings(found.raw);
-  }
-  if (found.type === 'object' && found.raw) {
-    return parseObjectStringValues(found.raw);
-  }
-  if (found.type === 'string' && found.value) {
-    return [found.value.trim()];
-  }
-  if (found.type === 'primitive' && found.value) {
-    return [found.value.trim()];
-  }
-  return [];
-};
-
-const extractFieldsFromJsonLike = (text: string) => ({
-  question: extractStringValueLoose(text, 'question'),
-  questionType: extractStringValueLoose(text, 'questionType'),
-  options: extractOptionsLoose(text),
-  answer: extractStringValueLoose(text, 'answer'),
-  subfield: extractStringValueLoose(text, 'subfield'),
-  academicLevel: extractStringValueLoose(text, 'academicLevel'),
-  difficulty: extractStringValueLoose(text, 'difficulty')
-});
 
 export interface GeneratorConversationTurn {
   prompt: string;
@@ -301,34 +212,36 @@ export async function generateProblemFromText(
   user += '1. Begin with a section labeled "Analysis:" where you reason step by step about the source problem, explore relevant properties, and decide how to adapt it to the target question type. Do not skip this analysis.\n';
   user += '2. Using the insights from your analysis, rewrite the problem so it fully conforms to the target question type while preserving the core idea and making the prompt self-contained.\n';
   user += '3. Populate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) from your rewritten statement; treat the draft above only as optional hints. Avoid empty strings?if a field seems intrinsically unsuitable, explain why in the analysis before choosing the closest valid value.\n';
-  user += `   - Set "questionType" in the JSON output to "${targetType}" exactly.\n`;
+  user += `   - Set "questionType" in the Generated Question block to "${targetType}" exactly.\n`;
   user += '   - Select subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when no option fits).\n';
   if (targetType === 'Multiple Choice') {
     user += `   - Multiple Choice: create ${expectedOptionsCount} options labeled ${optionLabels.join(', ')} and ensure exactly one option is correct and identified in "answer".\n`;
   } else {
-    user += '   - Non-multiple-choice question types must set "options" to an empty array [].\n';
+    user += '   - Non-multiple-choice question types must output "options: (none)" in the Generated Question block.\n';
   }
   user += '   - Fill-in-the-blank: insert exactly one explicit blank such as "___". When the source only asserts existence, ask for a single concrete witness or numerical property that fills that blank, and return the answer as a single consistent string (e.g., "4").\n';
   user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
-  user += '4. After the analysis, output a section labeled "JSON:" on a new line, followed immediately by only the JSON object containing the seven keys specified in the system message. Do not add Markdown fences, language tags, prefixes like "json", backticks, comments, or any other text before or after the JSON object. Violating this will be treated as an incorrect response.\n';
-  user += '   - Format requirements:\n';
-  user += '     ? The reply must start with "Analysis:" and end that block with a blank line.\n';
-  user += '     ? Immediately after the blank line, emit the exact HTTP-style headers:\n';
-  user += '       HTTP/1.1 200 OK\n';
-  user += '       Content-Type: application/json\n';
-  user += '       (blank line)\n';
-  user += '     ? Then write the literal marker "JSON:" on its own line followed by the JSON object.\n';
-  user += '   - All JSON strings must escape backslashes, quotes, and control characters using standard JSON escaping (e.g., \\theta, \\n).\n';
-  user += '   - Do not wrap the JSON or any string fields in LaTeX math delimiters such as $...$ or \\(...\\). Provide raw JSON only.\n';
-  user += '   - Example sequence (spacing matters):\n';
-  user += '     Analysis:\n';
-  user += '     <reasoning>\n';
-  user += '     \n';
-  user += '     HTTP/1.1 200 OK\n';
-  user += '     Content-Type: application/json\n';
-  user += '     \n';
-  user += '     JSON:\n';
-  user += '     {"question": "...", ...}\n';
+  user += '4. After the analysis, emit the final answer strictly in the template below (no extra text before or after it).\n';
+  user += '   Output Format:\n';
+  user += '   <Thinking>{{<analysis text>}}</Thinking>\n';
+  user += '   <Generated Question>{{\n';
+  user += '   questionType: <value>\n';
+  user += '   question: <value>\n';
+  user += '   options:\n';
+  user += '   A) <option text>\n';
+  user += '   B) <option text>\n';
+  user += '   answer: <value>\n';
+  user += '   subfield: <value>\n';
+  user += '   academicLevel: <value>\n';
+  user += '   difficulty: <value>\n';
+  user += '   }}</Generated Question>\n';
+  user += '   - Additional requirements:\n';
+  user += '     ? Keep the field names exactly as shown (case-sensitive).\n';
+  user += '     ? Use raw LaTeX (single backslashes) inside values; do not add extra escaping or Markdown fences.\n';
+  user += '     ? Replace all placeholder text (e.g., <value>, A) <option text>) with the actual content and remove example lines you do not need.\n';
+  user += '     ? If the question type is not Multiple Choice, write "options: (none)" on that line and do not list option lines.\n';
+  user += '     ? When the question type is Multiple Choice, put each option on its own line starting with "A)", "B)", etc. (add C), D), ... as required).\n';
+  user += '     ? Do not output any commentary outside the <Thinking> and <Generated Question> tags.\n';
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
@@ -353,30 +266,13 @@ export async function generateProblemFromText(
     { role: 'user', content: user }
   ], agent.config, { temperature: 0.2 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
 
-  const jsonMarker = raw.indexOf('JSON:');
-  if (jsonMarker === -1) {
-    console.error('LLM response missing JSON section', raw);
-    throw new LLMGenerationError('LLM response missing JSON section', raw);
-  }
-  let jsonText = raw.slice(jsonMarker + 5).trim();
-  const CODE_FENCES = ['```json', '```JSON', '```'];
-  for (const fence of CODE_FENCES) {
-    if (jsonText.startsWith(fence)) {
-      const fenceEnd = jsonText.indexOf('```', fence.length);
-      if (fenceEnd !== -1) {
-        jsonText = jsonText.slice(fence.length, fenceEnd).trim();
-      }
-    }
-  }
-  if (jsonText.toLowerCase().startsWith('json')) {
-    jsonText = jsonText.slice(4).trim();
-  }
-  if (!jsonText) {
-    console.error('LLM response JSON section empty', raw);
-    throw new LLMGenerationError('LLM response JSON section empty', raw);
+  const generatedSection = extractTagContent(raw, 'Generated Question');
+  if (!generatedSection) {
+    console.error('Generated Question block missing', raw);
+    throw new LLMGenerationError('Generated Question block missing', raw);
   }
 
-  const extracted = extractFieldsFromJsonLike(jsonText);
+  const extracted = parseGeneratedQuestionContent(generatedSection);
 
   const sanitizeText = (value: string): string => {
     if (!value) return '';
@@ -443,7 +339,7 @@ export async function generateProblemFromText(
   }
   if (missing.length > 0) {
     const message = `Failed to parse LLM response: missing or invalid fields: ${missing.join(', ')}`;
-    throw new LLMGenerationError(message, jsonText);
+    throw new LLMGenerationError(message, raw);
   }
 
   return { patch, raw };
