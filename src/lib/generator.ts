@@ -256,6 +256,18 @@ export async function generateProblemFromText(
     'Every reply must contain exactly the <Thinking> and <Generated Question> blocks described by the user.'
   ].join(' ');
 
+  const conversation = options?.conversation ?? [];
+  const feedbackItems: string[] = [];
+  conversation.forEach((turn, idx) => {
+    const feedback = turn.feedback?.trim();
+    if (feedback) {
+      const normalized = feedback.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
+      if (normalized) {
+        feedbackItems.push(`- Round ${idx + 1}: ${normalized}`);
+      }
+    }
+  });
+
   const userLines: string[] = [];
 
   userLines.push('## Objective');
@@ -292,26 +304,40 @@ export async function generateProblemFromText(
   userLines.push(`- difficulty options: ${difficultyList}`);
   userLines.push('');
 
+  if (conversation.length > 0) {
+    userLines.push('## Feedback Summary');
+    if (feedbackItems.length > 0) {
+      userLines.push(...feedbackItems);
+    } else {
+      userLines.push('- No explicit feedback so far; maintain prior improvements and refine them further.');
+    }
+    userLines.push('');
+  }
+
   userLines.push('## Workflow Requirements');
-  userLines.push('1. Study the source problem first. In the <Thinking> block, start with "Analysis:" and use numbered steps to explain the mathematical ideas, invariants, and solution path you observe. Identify how these ideas inform the target question type.');
-  userLines.push('2. Decide how to adapt the problem so the resulting task is mathematically coherent for the requested type. It may differ noticeably from the surface wording of the source as long as the underlying concept stays consistent.');
-  userLines.push('3. Produce the final version and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any choice seems ambiguous, document the reasoning in the analysis before selecting the closest valid option.');
+  userLines.push('1. Structure the <Thinking> block with three numbered steps exactly in this order:');
+  userLines.push('   - 1. Feedback alignment - reference each bullet from the Feedback Summary (or explicitly state that none exists) and describe how you will address it.');
+  userLines.push('   - 2. Mathematical study - analyze the source problem like a teacher, noting key concepts, invariants, and solution strategies.');
+  userLines.push('   - 3. Adaptation plan - explain how you will reshape the problem to fit the target question type while preserving the core mathematical idea.');
+  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
   userLines.push('   - Keep questionType exactly equal to the target type.');
   userLines.push('   - Choose subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when nothing fits).');
   userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
   userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
   userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
-  userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
-  userLines.push('5. If prior conversation rounds exist, integrate all feedback cumulatively rather than starting over.');
+  userLines.push('3. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
+  userLines.push('4. Integrate insights from all prior rounds instead of restarting from scratch.');
   userLines.push('');
 
   userLines.push('## Output Contract');
   userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
   userLines.push('<Thinking>{{');
   userLines.push('Analysis:');
-  userLines.push('1. <reasoning step 1>');
-  userLines.push('2. <reasoning step 2>');
+  userLines.push('1. Feedback alignment - <list how each feedback item will be satisfied, or state that there is no prior feedback>');
+  userLines.push('2. Mathematical study - <summarize the core ideas, invariants, and solution path of the source problem>');
+  userLines.push('3. Adaptation plan - <describe how the final task will match the target type while preserving the key concept>');
   userLines.push('}}</Thinking>');
+  userLines.push('');
   userLines.push('<Generated Question>{{');
   userLines.push(`questionType: ${targetType}`);
   userLines.push('subfield: <value from allowed list or "Others: ...">');
@@ -335,7 +361,6 @@ export async function generateProblemFromText(
   userLines.push('}}</Generated Question>');
   userLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, and do not add any text after </Generated Question>.');
 
-  const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
     userLines.push('');
     userLines.push('## Conversation History (oldest first)');
