@@ -252,8 +252,7 @@ export async function generateProblemFromText(
 
   const systemPrompt = agent.prompt?.trim() || [
     'You are an expert mathematics assessment authoring assistant.',
-    'Follow the user instructions precisely.',
-    'Never respond with JSON blobs or Markdown code fences.',
+    'Follow the user instructions precisely and focus on mathematical soundness.',
     'Every reply must contain exactly the <Thinking> and <Generated Question> blocks described by the user.'
   ].join(' ');
 
@@ -294,33 +293,30 @@ export async function generateProblemFromText(
   userLines.push('');
 
   userLines.push('## Workflow Requirements');
-  userLines.push('1. Perform deliberate reasoning about the transformation before writing the final question. Place this inside the <Thinking> block starting with "Analysis:" and use numbered steps.');
-  userLines.push('2. Rewrite the problem so it is self-contained, respects the source intent, and fits the target question type.');
-  userLines.push('3. Populate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) using the rewritten statement and allowed values. If a field seems ambiguous, justify the choice in the analysis and then pick the closest valid option.');
-  userLines.push(`   - Set "X-Question-Type" and the body metadata to "${targetType}" exactly.`);
-  userLines.push('   - Select subfield, academicLevel, and difficulty strictly from the allowed lists (use "Others: ..." only when no option fits).');
-  userLines.push('   - Multiple Choice: produce exactly the expected number of options, labeled sequentially (A, B, C, ...), with exactly one correct answer identified.');
-  userLines.push('   - Fill-in-the-blank: include exactly one blank (e.g., "___") in the question statement and provide a single definitive answer string.');
-  userLines.push('   - Proof: phrase the prompt as a proof request and give a concise, logically ordered proof outline in the answer.');
-  userLines.push('4. Maintain LaTeX compatibility by using raw TeX (single backslashes) with no additional escaping or Markdown fences.');
-  userLines.push('5. If prior conversation rounds exist, integrate all feedback cumulatively instead of restarting from scratch.');
+  userLines.push('1. Study the source problem first. In the <Thinking> block, start with "Analysis:" and use numbered steps to explain the mathematical ideas, invariants, and solution path you observe. Identify how these ideas inform the target question type.');
+  userLines.push('2. Decide how to adapt the problem so the resulting task is mathematically coherent for the requested type. It may differ noticeably from the surface wording of the source as long as the underlying concept stays consistent.');
+  userLines.push('3. Produce the final version and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any choice seems ambiguous, document the reasoning in the analysis before selecting the closest valid option.');
+  userLines.push('   - Keep questionType exactly equal to the target type.');
+  userLines.push('   - Choose subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when nothing fits).');
+  userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
+  userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
+  userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
+  userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
+  userLines.push('5. If prior conversation rounds exist, integrate all feedback cumulatively rather than starting over.');
   userLines.push('');
 
   userLines.push('## Output Contract');
-  userLines.push('Respond with the two blocks below and absolutely no extra commentary. Keep a blank line between the HTTP-style headers and the body. Replace every placeholder with actual content.');
+  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
   userLines.push('<Thinking>{{');
   userLines.push('Analysis:');
   userLines.push('1. <reasoning step 1>');
   userLines.push('2. <reasoning step 2>');
   userLines.push('}}</Thinking>');
   userLines.push('<Generated Question>{{');
-  userLines.push('HTTP/1.1 200 OK');
-  userLines.push('Content-Type: application/problem+text; charset=utf-8');
-  userLines.push(`X-Question-Type: ${targetType}`);
-  userLines.push('X-Subfield: <value from allowed list or "Others: ...">');
-  userLines.push('X-Academic-Level: <value from allowed list>');
-  userLines.push('X-Difficulty: <value from allowed list>');
-  userLines.push('X-Answer: <single-line summary of the final answer>');
+  userLines.push(`questionType: ${targetType}`);
+  userLines.push('subfield: <value from allowed list or "Others: ...">');
+  userLines.push('academicLevel: <value from allowed list>');
+  userLines.push('difficulty: <value from allowed list>');
   userLines.push('');
   userLines.push('Question:');
   userLines.push('<final question text>');
@@ -337,7 +333,7 @@ export async function generateProblemFromText(
   userLines.push('Answer:');
   userLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
   userLines.push('}}</Generated Question>');
-  userLines.push('Replace every <...> placeholder with actual content. For Multiple Choice, keep exactly the listed option labels and fill each with unique text. For non-multiple-choice types, retain the single line "Options: (none)". Do not add any commentary after </Generated Question>.');
+  userLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, and do not add any text after </Generated Question>.');
 
   const conversation = options?.conversation ?? [];
   if (conversation.length > 0) {
