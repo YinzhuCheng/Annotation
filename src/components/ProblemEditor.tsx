@@ -51,6 +51,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const latexPreviewRef = useRef<HTMLDivElement>(null);
   const questionPreviewRef = useRef<HTMLDivElement>(null);
   const answerPreviewRef = useRef<HTMLDivElement>(null);
+  const previewMathJaxRef = useRef<HTMLDivElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'latex_preview' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
@@ -68,6 +69,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
   const [questionMathJaxError, setQuestionMathJaxError] = useState('');
   const [answerMathJaxError, setAnswerMathJaxError] = useState('');
+  const [previewMathJaxError, setPreviewMathJaxError] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -278,6 +281,45 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     render();
     return () => { cancelled = true; };
   }, [current.answer, current.options, current.questionType, defaults.optionsCount]);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const container = previewMathJaxRef.current;
+    if (!container) return;
+    let cancelled = false;
+    setPreviewMathJaxError('');
+    container.innerHTML = '';
+    container.textContent = previewSnippet;
+    const run = async () => {
+      try {
+        const mj = await ensureMathJaxReady();
+        if (cancelled) return;
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        if (errors.length > 0) {
+          setPreviewMathJaxError(errors.join('; '));
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setPreviewMathJaxError(message);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [previewOpen, previewSnippet]);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      setPreviewMathJaxError('');
+    }
+  }, [previewOpen]);
 
   useEffect(() => {
     if (!feedbackSavedAt) return;
@@ -587,6 +629,41 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   useEffect(() => { ensureOptionsForMC(); }, [current.questionType]);
   useEffect(() => { ensureOptionsForMC(); }, [defaults.optionsCount]);
 
+  const renderPreviewSnippet = () => {
+    const lines: string[] = [];
+    lines.push(current.question?.trim() || '(blank question)');
+    lines.push('');
+    lines.push(`Type: ${current.questionType || 'N/A'}`);
+    lines.push(`Subfield: ${current.subfield || 'N/A'}`);
+    lines.push(`Academic level: ${current.academicLevel || 'N/A'}`);
+    lines.push(`Difficulty: ${current.difficulty || 'N/A'}`);
+    if (current.questionType === 'Multiple Choice') {
+      lines.push('');
+      lines.push('Options:');
+      const optionCount = Math.max(2, defaults.optionsCount || current.options?.length || 0);
+      const options = Array.from({ length: optionCount }, (_, idx) => current.options?.[idx] ?? '');
+      options.forEach((opt, idx) => {
+        const label = String.fromCharCode(65 + idx);
+        lines.push(`${label}) ${opt || '(blank)'}`);
+      });
+    }
+    lines.push('');
+    lines.push('Answer:');
+    lines.push(current.answer?.trim() || '(blank answer)');
+    return lines.join('\n');
+  };
+
+  const previewSnippet = useMemo(() => renderPreviewSnippet(), [
+    current.question,
+    current.questionType,
+    current.subfield,
+    current.academicLevel,
+    current.difficulty,
+    current.answer,
+    JSON.stringify(current.options),
+    defaults.optionsCount
+  ]);
+
   // ----- Subfield helpers -----
   const selectedSubfields = useMemo(() => (current.subfield ? current.subfield.split(';').filter(Boolean) : []), [current.subfield]);
   const subfieldOptions = defaults.subfieldOptions;
@@ -669,6 +746,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         <div className="row" style={{gap:8, flexWrap:'wrap'}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
           <button onClick={handleSaveCurrent}>{t('saveProblem')}</button>
+          <button onClick={() => setPreviewOpen((prev) => !prev)}>{previewOpen ? t('previewClose') : t('previewOpen')}</button>
         </div>
         <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
@@ -1062,6 +1140,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <button onClick={()=> onOpenClear && onOpenClear()}>{t('clearBank')}</button>
           </div>
         </div>
+
+        {previewOpen && (
+          <div>
+            <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+              <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+                <div className="label" style={{margin:0, fontSize:'1.15rem', fontWeight:600}}>{t('questionPreviewTitle')}</div>
+              </div>
+              <div className="small" style={{color:'var(--text-muted)'}}>{t('questionPreviewHint')}</div>
+              <div ref={previewMathJaxRef} style={{padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:120, whiteSpace:'pre-wrap'}} />
+              {previewMathJaxError && (
+                <span className="small" style={{color:'#f87171'}}>{t('mathJaxPreviewError', { error: previewMathJaxError })}</span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
