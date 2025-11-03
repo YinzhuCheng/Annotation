@@ -12,11 +12,62 @@ interface ParsedGeneratedQuestion {
 }
 
 const extractTagContent = (source: string, rawTag: string): string | null => {
-  const tagPattern = rawTag.replace(/\s+/g, '\\s+');
-  const regex = new RegExp(`<${tagPattern}>\\s*{{([\\s\\S]*?)}}`, 'i');
-  const match = regex.exec(source);
-  return match ? match[1].trim() : null;
+  if (!source) return null;
+
+  const openTag = `<${rawTag}>`;
+  const closeTag = `</${rawTag}>`;
+  const lowerSource = source.toLowerCase();
+  const lowerOpen = openTag.toLowerCase();
+  const lowerClose = closeTag.toLowerCase();
+
+  const openIndex = lowerSource.indexOf(lowerOpen);
+  if (openIndex === -1) return null;
+
+  const contentStart = openIndex + openTag.length;
+  const closeIndex = lowerSource.indexOf(lowerClose, contentStart);
+  if (closeIndex === -1) return null;
+
+  const inner = source.slice(contentStart, closeIndex).trim();
+  if (!inner) return null;
+
+  const cleanResult = (value: string | null): string | null => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const withoutTrailing = trimmed.replace(/\s*}+\s*$/, '').trim();
+    return withoutTrailing || null;
+  };
+
+  const extractBetween = (input: string, openSequence: string): string | null => {
+    const openIdx = input.indexOf(openSequence);
+    if (openIdx === -1) return null;
+    let depth = openSequence.length;
+    for (let i = openIdx + openSequence.length; i < input.length; i += 1) {
+      const ch = input[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return input.slice(openIdx + openSequence.length, i);
+        }
+      }
+    }
+    return input.slice(openIdx + openSequence.length);
+  };
+
+  const fromDouble = cleanResult(extractBetween(inner, '{{'));
+  if (fromDouble !== null) return fromDouble;
+
+  const fromSingle = cleanResult(extractBetween(inner, '{'));
+  if (fromSingle !== null) return fromSingle;
+
+  return cleanResult(inner) || null;
 };
+
+const normalizeKey = (input: string): string => input
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '');
 
 const cleanOptionText = (fragment: string): string | null => {
   if (!fragment) return null;
@@ -25,7 +76,7 @@ const cleanOptionText = (fragment: string): string | null => {
   text = text.replace(/^[-?*?]+\s*/, '').trim();
   if (/^\(none\)$/i.test(text) || /^none$/i.test(text)) return null;
   if (/<option text>/i.test(text) || /<value>/i.test(text)) return null;
-  const labeled = text.match(/^([A-Z])[)\.-:]\s*(.*)$/);
+  const labeled = text.match(/^([A-Z])[)\.-:]\s*([\s\S]*)$/);
   if (labeled) {
     const body = labeled[2].trim();
     return body || labeled[1];
@@ -34,8 +85,29 @@ const cleanOptionText = (fragment: string): string | null => {
 };
 
 const addOptionFragment = (fragment: string, target: string[]) => {
-  const option = cleanOptionText(fragment);
-  if (option) target.push(option);
+  if (!fragment) return;
+  let text = fragment.trim();
+  if (!text) return;
+
+  if (/^\(none\)$/i.test(text) || /^none$/i.test(text)) return;
+  if (/<option text>/i.test(text) || /<value>/i.test(text)) return;
+
+  const labeled = text.match(/^([A-Z])[)\.-:]\s*([\s\S]*)$/);
+  if (labeled) {
+    const body = cleanOptionText(text);
+    if (body) target.push(body);
+    return;
+  }
+
+  text = text.replace(/^[-*]+\s*/, '').trim();
+  if (!text) return;
+
+  if (target.length === 0) {
+    target.push(text);
+  } else {
+    const combined = `${target[target.length - 1]}\n${text}`.trim();
+    target[target.length - 1] = combined;
+  }
 };
 
 const parseOptionValue = (value: string, target: string[]) => {
@@ -64,69 +136,154 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
     difficulty: ''
   };
 
-  const lines = content.split(/\r?\n/).map((line) => line.trim());
-  let currentField: 'question' | 'options' | null = null;
+  if (!content) {
+    return result;
+  }
 
-  for (const line of lines) {
-    if (!line) continue;
+  const normalized = content.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return result;
 
-    const kvMatch = line.match(/^([A-Za-z ]+)\s*:\s*(.*)$/);
-    if (kvMatch) {
-      const key = kvMatch[1].trim().toLowerCase().replace(/\s+/g, '');
-      const value = kvMatch[2].trim();
+  const lines = normalized.split('\n').map((line) => line.replace(/\r$/, ''));
+  const sections: Record<string, string[]> = {};
+  const headers: Record<string, string> = {};
+  const bodySectionKeys = new Set<string>([
+    'question',
+    'question_type',
+    'questiontype',
+    'type',
+    'options',
+    'answer',
+    'subfield',
+    'subfields',
+    'academic',
+    'academic_level',
+    'academiclevel',
+    'difficulty'
+  ]);
 
-      switch (key) {
-        case 'question':
-          result.question = value;
-          currentField = 'question';
-          break;
-        case 'questiontype':
-        case 'type':
-          result.questionType = value;
-          currentField = null;
-          break;
-        case 'options':
-          if (/^\(none\)$/i.test(value) || /^none$/i.test(value)) {
-            currentField = null;
-          } else {
-            currentField = 'options';
-            if (value) parseOptionValue(value, result.options);
-          }
-          break;
-        case 'answer':
-          result.answer = value;
-          currentField = null;
-          break;
-        case 'subfield':
-        case 'subfields':
-          result.subfield = value;
-          currentField = null;
-          break;
-        case 'academiclevel':
-        case 'academic':
-          result.academicLevel = value;
-          currentField = null;
-          break;
-        case 'difficulty':
-          result.difficulty = value;
-          currentField = null;
-          break;
-        default:
-          currentField = null;
+  let idx = 0;
+
+  const firstLine = lines[0]?.trim();
+  if (firstLine && /^HTTP\/\d+(?:\.\d+)?\s+\d{3}/i.test(firstLine)) {
+    idx = 1;
+  }
+
+  let currentSection: string | null = null;
+
+  while (idx < lines.length) {
+    const rawLine = lines[idx];
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      idx += 1;
+      break;
+    }
+    if (/^}+$/.test(trimmed)) {
+      idx += 1;
+      continue;
+    }
+
+    const kvMatch = trimmed.match(/^([\w-]+)\s*:\s*(.*)$/);
+    if (!kvMatch) {
+      break;
+    }
+
+    const rawKey = kvMatch[1];
+    const normalizedKey = normalizeKey(rawKey);
+    const value = kvMatch[2]?.trim() ?? '';
+
+    if (bodySectionKeys.has(normalizedKey)) {
+      currentSection = normalizedKey;
+      sections[normalizedKey] = sections[normalizedKey] || [];
+      if (value) {
+        sections[normalizedKey].push(value);
+      }
+      idx += 1;
+      break;
+    }
+
+    headers[rawKey.toLowerCase()] = value;
+    idx += 1;
+  }
+
+  while (idx < lines.length && lines[idx].trim() === '') {
+    idx += 1;
+  }
+
+  for (; idx < lines.length; idx += 1) {
+    const rawLine = lines[idx].replace(/\r$/, '');
+    const trimmed = rawLine.trimEnd();
+    if (/^}+$/.test(trimmed.trim())) {
+      if (currentSection === 'answer') {
+        currentSection = null;
+      }
+      continue;
+    }
+    const sectionMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9 _-]*)\s*:\s*(.*)$/);
+    if (sectionMatch) {
+      const key = normalizeKey(sectionMatch[1]);
+      currentSection = key;
+      sections[key] = sections[key] || [];
+      const remainder = sectionMatch[2];
+      if (remainder) {
+        sections[key].push(remainder.trim());
+        if (key === 'answer') {
+          currentSection = null;
+        }
+      } else if (key === 'answer') {
+        currentSection = 'answer';
       }
       continue;
     }
 
-    if (currentField === 'question') {
-      result.question = `${result.question} ${line}`.trim();
+    if (currentSection) {
+      sections[currentSection].push(rawLine);
       continue;
     }
+  }
 
-    if (currentField === 'options' || /^[A-Z][)\.-:]/.test(line)) {
-      addOptionFragment(line, result.options);
-      currentField = 'options';
+  const getSectionText = (key: string): string => {
+    const payload = sections[key];
+    if (!payload || payload.length === 0) return '';
+    return payload.join('\n').trim();
+  };
+
+  const getHeader = (key: string): string => headers[key.toLowerCase()]?.trim() ?? '';
+
+  const optionsSection = sections['options'] ?? [];
+  const options: string[] = [];
+  if (optionsSection.length === 1 && /^\s*\(none\)\s*$/i.test(optionsSection[0])) {
+    // explicit none
+  } else if (optionsSection.length > 0) {
+    const block = optionsSection.join('\n').replace(/\r/g, '').trim();
+    if (block && !/^\(none\)$/i.test(block)) {
+      const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
+      segments.forEach((segment) => addOptionFragment(segment, options));
+      if (options.length === 0) {
+        parseOptionValue(block, options);
+      }
     }
   }
+
+  const typeHeader = getHeader('x-question-type')
+    || getHeader('x-questiontype')
+    || getHeader('question-type')
+    || getSectionText('question_type')
+    || getSectionText('questiontype')
+    || getSectionText('type');
+
+  const subfieldHeader = getHeader('x-subfield') || getHeader('subfield');
+  const academicHeader = getHeader('x-academic-level') || getHeader('x-academic') || getHeader('academic-level');
+  const difficultyHeader = getHeader('x-difficulty') || getHeader('difficulty');
+  const answerHeader = getHeader('x-answer') || getHeader('answer');
+
+  result.question = getSectionText('question');
+  result.questionType = typeHeader;
+  result.options = options;
+  const answerBlock = getSectionText('answer') || answerHeader;
+  result.answer = answerBlock.replace(/\s*}+\s*$/, '').trim();
+  result.subfield = getSectionText('subfield') || getSectionText('subfields') || subfieldHeader;
+  result.academicLevel = getSectionText('academic_level') || getSectionText('academic') || getSectionText('academiclevel') || academicHeader;
+  result.difficulty = getSectionText('difficulty') || difficultyHeader;
 
   return result;
 };
@@ -139,11 +296,15 @@ export interface GeneratorConversationTurn {
 
 export class LLMGenerationError extends Error {
   raw: string;
+  displayMessage: string;
 
   constructor(message: string, raw: string, cause?: unknown) {
     super(message);
     this.name = 'LLMGenerationError';
-    this.raw = raw;
+    const normalizedRaw = typeof raw === 'string' ? raw : '';
+    const trimmedRaw = normalizedRaw.trim();
+    this.raw = normalizedRaw;
+    this.displayMessage = trimmedRaw ? `${message}\n\n${normalizedRaw}` : message;
     if (cause !== undefined) {
       (this as any).cause = cause;
     }
@@ -184,82 +345,140 @@ export async function generateProblemFromText(
   const academicList = defaults.academicLevels.join('; ') || 'K12; Professional';
   const difficultyList = defaults.difficultyOptions.join('; ') || '1; 2; 3';
 
-  const systemPrompt = agent.prompt?.trim() || `You are a mathematics problem polishing assistant. Given a raw prompt and a target question type, rewrite the problem text so it fully conforms to that type, then construct all associated structured fields. Reply with a JSON object containing exactly the keys: question, questionType, options, answer, subfield, academicLevel, difficulty.`;
-
-  let user = `Original source text (blank means none):\n${sanitizedInput}\n\n`;
-  user += 'Current draft for reference (existing values may be overwritten):\n';
-  user += `- questionType: ${targetType}\n`;
-  user += `- question: ${existingQuestion || '<missing>'}\n`;
-  if (targetType === 'Multiple Choice') {
-    user += `- options (expected ${expectedOptionsCount}):\n`;
-    user += optionLabels.map((label, idx) => {
-      const value = existingOptionsNormalized[idx]?.trim();
-      return `  ${label}: ${value || '<missing>'}`;
-    }).join('\n');
-    user += '\n';
-  }
-  user += `- answer: ${existingAnswer || '<missing>'}\n`;
-  user += `- subfield: ${existingSubfield || '<missing>'}\n`;
-  user += `- academicLevel: ${existingAcademic || '<missing>'}\n`;
-  user += `- difficulty: ${existingDifficulty || '<missing>'}\n\n`;
-
-  user += 'Allowed values:\n';
-  user += `- subfields: ${subfieldList} (you may reply with "Others: <short descriptor>" if none fit)\n`;
-  user += `- academic levels: ${academicList}\n`;
-  user += `- difficulty options: ${difficultyList}\n\n`;
-
-  user += 'Instructions:\n';
-  user += '1. Begin with a section labeled "Analysis:" where you reason step by step about the source problem, explore relevant properties, and decide how to adapt it to the target question type. Do not skip this analysis.\n';
-  user += '2. Using the insights from your analysis, rewrite the problem so it fully conforms to the target question type while preserving the core idea and making the prompt self-contained.\n';
-  user += '3. Populate every field (question, questionType, options, answer, subfield, academicLevel, difficulty) from your rewritten statement; treat the draft above only as optional hints. Avoid empty strings?if a field seems intrinsically unsuitable, explain why in the analysis before choosing the closest valid value.\n';
-  user += `   - Set "questionType" in the Generated Question block to "${targetType}" exactly.\n`;
-  user += '   - Select subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when no option fits).\n';
-  if (targetType === 'Multiple Choice') {
-    user += `   - Multiple Choice: create ${expectedOptionsCount} options labeled ${optionLabels.join(', ')} and ensure exactly one option is correct and identified in "answer".\n`;
-  } else {
-    user += '   - Non-multiple-choice question types must output "options: (none)" in the Generated Question block.\n';
-  }
-  user += '   - Fill-in-the-blank: insert exactly one explicit blank such as "___". When the source only asserts existence, ask for a single concrete witness or numerical property that fills that blank, and return the answer as a single consistent string (e.g., "4").\n';
-  user += '   - Proof: phrase the question as a proof request and provide a concise, coherent proof outline in "answer".\n';
-  user += '4. After the analysis, emit the final answer strictly in the template below (no extra text before or after it).\n';
-  user += '   Output Format:\n';
-  user += '   <Thinking>{{<analysis text>}}</Thinking>\n';
-  user += '   <Generated Question>{{\n';
-  user += '   questionType: <value>\n';
-  user += '   question: <value>\n';
-  user += '   options:\n';
-  user += '   A) <option text>\n';
-  user += '   B) <option text>\n';
-  user += '   answer: <value>\n';
-  user += '   subfield: <value>\n';
-  user += '   academicLevel: <value>\n';
-  user += '   difficulty: <value>\n';
-  user += '   }}</Generated Question>\n';
-  user += '   - Additional requirements:\n';
-  user += '     ? Keep the field names exactly as shown (case-sensitive).\n';
-  user += '     ? Use raw LaTeX (single backslashes) inside values; do not add extra escaping or Markdown fences.\n';
-  user += '     ? Replace all placeholder text (e.g., <value>, A) <option text>) with the actual content and remove example lines you do not need.\n';
-  user += '     ? If the question type is not Multiple Choice, write "options: (none)" on that line and do not list option lines.\n';
-  user += '     ? When the question type is Multiple Choice, put each option on its own line starting with "A)", "B)", etc. (add C), D), ... as required).\n';
-  user += '     ? Do not output any commentary outside the <Thinking> and <Generated Question> tags.\n';
+  const systemPrompt = agent.prompt?.trim() || [
+    'You are an expert mathematics assessment authoring assistant.',
+    'Follow the user instructions precisely and focus on mathematical soundness.',
+    'Every reply must contain exactly the <Thinking> and <Generated Question> blocks described by the user.'
+  ].join(' ');
 
   const conversation = options?.conversation ?? [];
+  const feedbackItems: string[] = [];
+  conversation.forEach((turn, idx) => {
+    const feedback = turn.feedback?.trim();
+    if (feedback) {
+      const normalized = feedback.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
+      if (normalized) {
+        feedbackItems.push(`- Round ${idx + 1}: ${normalized}`);
+      }
+    }
+  });
+
+  const userLines: string[] = [];
+
+  userLines.push('## Objective');
+  userLines.push('Refine the mathematics problem using the provided context while ensuring every required field is valid and aligned with the target question type.');
+  userLines.push('');
+  userLines.push(`Target question type: ${targetType}`);
+  userLines.push('');
+
+  userLines.push('## Source Context');
+  userLines.push('Original source text (blank means none):');
+  userLines.push(sanitizedInput);
+  userLines.push('');
+  userLines.push('Existing draft values (you may replace any of them if needed):');
+  userLines.push(`- questionType: ${targetType}`);
+  userLines.push(`- question: ${existingQuestion || '<missing>'}`);
+  if (targetType === 'Multiple Choice') {
+    userLines.push(`- options (expected ${expectedOptionsCount}):`);
+    userLines.push(...optionLabels.map((label, idx) => {
+      const value = existingOptionsNormalized[idx]?.trim();
+      return `  ${label}: ${value || '<missing>'}`;
+    }));
+  } else {
+    userLines.push('- options: (none expected)');
+  }
+  userLines.push(`- answer: ${existingAnswer || '<missing>'}`);
+  userLines.push(`- subfield: ${existingSubfield || '<missing>'}`);
+  userLines.push(`- academicLevel: ${existingAcademic || '<missing>'}`);
+  userLines.push(`- difficulty: ${existingDifficulty || '<missing>'}`);
+  userLines.push('');
+
+  userLines.push('## Allowed Field Values');
+  userLines.push(`- subfields: ${subfieldList} (you may reply with "Others: <short descriptor>" if none fit)`);
+  userLines.push(`- academic levels: ${academicList}`);
+  userLines.push(`- difficulty options: ${difficultyList}`);
+  userLines.push('');
+
   if (conversation.length > 0) {
-    user += '\nConversation history (oldest first). Use prior feedback to refine the next draft.\n';
+    userLines.push('## Feedback Summary');
+    if (feedbackItems.length > 0) {
+      userLines.push(...feedbackItems);
+    } else {
+      userLines.push('- No explicit feedback so far; maintain prior improvements and refine them further.');
+    }
+    userLines.push('');
+  }
+
+  userLines.push('## Workflow Requirements');
+  userLines.push('1. Structure the <Thinking> block with three numbered steps exactly in this order:');
+  userLines.push('   - 1. Feedback alignment - reference each bullet from the Feedback Summary (or explicitly state that none exists) and describe how you will address it.');
+  userLines.push('   - 2. Mathematical study - analyze the source problem like a teacher, noting key concepts, invariants, and solution strategies.');
+  userLines.push('   - 3. Adaptation plan - explain how you will reshape the problem to fit the target question type while preserving the core mathematical idea.');
+  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
+  userLines.push('   - Keep questionType exactly equal to the target type.');
+  userLines.push('   - Choose subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when nothing fits).');
+  userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
+  userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
+  userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
+  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions.');
+  userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
+  userLines.push('5. Integrate insights from all prior rounds instead of restarting from scratch.');
+  userLines.push('');
+
+  userLines.push('## Output Contract');
+  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
+  userLines.push('<Thinking>{{');
+  userLines.push('Analysis:');
+  userLines.push('1. Feedback alignment - <list how each feedback item will be satisfied, or state that there is no prior feedback>');
+  userLines.push('2. Mathematical study - <summarize the core ideas, invariants, and solution path of the source problem>');
+  userLines.push('3. Adaptation plan - <describe how the final task will match the target type while preserving the key concept>');
+  userLines.push('}}</Thinking>');
+  userLines.push('');
+  userLines.push('<Generated Question>{{');
+  userLines.push(`questionType: ${targetType}`);
+  userLines.push('subfield: <value from allowed list or "Others: ...">');
+  userLines.push('academicLevel: <value from allowed list>');
+  userLines.push('difficulty: <value from allowed list>');
+  userLines.push('');
+  userLines.push('Question:');
+  userLines.push('<final question text>');
+  userLines.push('');
+  if (targetType === 'Multiple Choice') {
+    userLines.push('Options:');
+    optionLabels.forEach((label) => {
+      userLines.push(`${label}) <option text>`);
+    });
+  } else {
+    userLines.push('Options: (none)');
+  }
+  userLines.push('');
+  userLines.push('Answer:');
+  userLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
+  userLines.push('}}</Generated Question>');
+  userLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, and do not add any text after </Generated Question>.');
+
+  if (conversation.length > 0) {
+    userLines.push('');
+    userLines.push('## Conversation History (oldest first)');
+    userLines.push('Use the earlier attempts and feedback to refine the next draft. Keep improvements cumulative.');
     conversation.forEach((turn, idx) => {
       const prompt = turn.prompt?.trim() || '(empty)';
       const response = turn.response?.trim() || '(empty)';
       const feedback = turn.feedback?.trim();
-      user += `Round ${idx + 1}:\n`;
-      user += `Prompt:\n${prompt}\n`;
-      user += `Model reply:\n${response}\n`;
+      userLines.push(`Round ${idx + 1} Prompt:`);
+      userLines.push(prompt);
+      userLines.push(`Round ${idx + 1} Model Reply:`);
+      userLines.push(response);
       if (feedback) {
-        user += `User feedback:\n${feedback}\n`;
+        userLines.push(`Round ${idx + 1} User Feedback:`);
+        userLines.push(feedback);
       }
-      user += '\n';
+      userLines.push('');
     });
-    user += 'Incorporate all constructive feedback points while keeping improvements cumulative.\n';
+    userLines.push('Incorporate all constructive feedback points while keeping improvements cumulative.');
   }
+
+  const user = userLines.join('\n');
 
   const raw = await chatStream([
     { role: 'system', content: systemPrompt },
