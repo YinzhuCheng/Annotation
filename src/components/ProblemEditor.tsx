@@ -110,6 +110,92 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return lines.join('\n');
   };
 
+  const getOptionLabel = (idx: number) => String.fromCharCode(65 + idx);
+
+  const getOptionCount = () => {
+    if (current.questionType !== 'Multiple Choice') return 0;
+    const existing = Array.isArray(current.options) ? current.options.length : 0;
+    const configured = defaults.optionsCount || 5;
+    const baseline = existing > 0 ? existing : configured;
+    return Math.max(2, baseline);
+  };
+
+  const buildOptionsAnswerSnippet = (answerText: string, optionsOverride?: string[]): string => {
+    const lines: string[] = [];
+    if (current.questionType === 'Multiple Choice') {
+      const optionCount = getOptionCount();
+      const baseOptions = optionsOverride ?? current.options ?? [];
+      const optionsList = Array.from({ length: optionCount }, (_, idx) => baseOptions[idx] ?? '');
+      lines.push('Options:');
+      optionsList.forEach((opt, idx) => {
+        const label = getOptionLabel(idx);
+        const body = (opt ?? '').trim();
+        lines.push(body ? `${label}) ${body}` : `${label})`);
+      });
+      lines.push('');
+    }
+    lines.push('Answer:');
+    lines.push(answerText ?? '');
+    return lines.join('\n');
+  };
+
+  const parseOptionsAnswerSnippet = (input: string): { options: string[] | null; answer: string } => {
+    const normalized = input.replace(/\r\n/g, '\n').trim();
+    const answerLabelRegex = /(^|\n)\s*Answer\s*:\s*/i;
+    const match = answerLabelRegex.exec(normalized);
+    if (!match) {
+      return { options: null, answer: normalized };
+    }
+    const answerStart = match.index + match[0].length;
+    const answerText = normalized.slice(answerStart).trim();
+    if (current.questionType !== 'Multiple Choice') {
+      return { options: null, answer: answerText || normalized };
+    }
+    const optionsPartRaw = normalized.slice(0, match.index).replace(/^\s*Options\s*:\s*/i, '').trim();
+    const optionCount = getOptionCount();
+    const baseOptions = Array.from({ length: optionCount }, (_, idx) => current.options?.[idx] ?? '');
+    if (!optionsPartRaw) {
+      return { options: baseOptions.length > 0 ? baseOptions : null, answer: answerText };
+    }
+    const updated = baseOptions.map((opt) => opt ?? '');
+    if (updated.length === 0) {
+      return { options: null, answer: answerText };
+    }
+    const lines = optionsPartRaw.split('\n').map((line) => line.trim()).filter(Boolean);
+    const assigned = new Set<number>();
+    const assignOption = (index: number, value: string) => {
+      if (index >= 0 && index < updated.length) {
+        updated[index] = value.trim();
+        assigned.add(index);
+        return true;
+      }
+      return false;
+    };
+    for (const line of lines) {
+      const labeled = line.match(/^([A-Z])[)\.\-:]\s*(.*)$/);
+      if (labeled) {
+        const idx = labeled[1].charCodeAt(0) - 65;
+        const body = labeled[2].trim();
+        if (assignOption(idx, body)) {
+          continue;
+        }
+      }
+      const nextIdx = updated.findIndex((_, idx) => !assigned.has(idx));
+      if (nextIdx !== -1) {
+        assignOption(nextIdx, line);
+      }
+    }
+    return { options: updated, answer: answerText };
+  };
+
+  const hasOptionsOrAnswerContent = () => {
+    const answerHasContent = Boolean(current.answer && current.answer.trim().length > 0);
+    const optionsHasContent = current.questionType === 'Multiple Choice'
+      && Array.isArray(current.options)
+      && current.options.some((opt) => opt && opt.trim().length > 0);
+    return answerHasContent || optionsHasContent;
+  };
+
   useEffect(() => {
     if (!current) return;
     setTranslationInput(current.question || '');
@@ -166,9 +252,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       if (!container) return;
       container.innerHTML = '';
       setAnswerMathJaxError('');
-      const source = current.answer?.trim() ?? '';
-      if (!source) return;
-      container.textContent = source;
+      if (!hasOptionsOrAnswerContent()) {
+        return;
+      }
+      const snippet = buildOptionsAnswerSnippet(current.answer ?? '');
+      container.textContent = snippet;
       try {
         const mj = await ensureMathJaxReady();
         mj.texReset?.();
@@ -188,7 +276,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     };
     render();
     return () => { cancelled = true; };
-  }, [current.answer]);
+  }, [current.answer, current.options, current.questionType, defaults.optionsCount]);
 
   useEffect(() => {
     if (!feedbackSavedAt) return;
@@ -322,12 +410,35 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   const fixLatex = async (field: 'question' | 'answer') => {
     const text = (current as any)[field] as string;
-    if (!text?.trim()) return;
+    if (!text?.trim() && field !== 'answer') return;
+    if (field === 'answer' && !combinedOptionsAndAnswerFilled) return;
     if (!ensureAgent('latex')) return;
     setLlmStatusSource(field === 'question' ? 'latex_question' : 'latex_answer');
-    const payload = composeLatexCorrectionInput(text, undefined, field === 'question' ? 'Question field' : 'Answer field');
-    const corrected = await latexCorrection(payload, agents.latex, { onStatus: (s)=> setLlmStatus(s) });
-    update({ [field]: corrected } as any);
+    const contextLabel = field === 'question'
+      ? 'Question field'
+      : current.questionType === 'Multiple Choice'
+        ? 'Options and answer section'
+        : 'Answer section';
+    const snippet = field === 'question'
+      ? text
+      : buildOptionsAnswerSnippet(text, current.options ?? []);
+    const payload = composeLatexCorrectionInput(snippet, undefined, contextLabel);
+    const corrected = (await latexCorrection(payload, agents.latex, { onStatus: (s)=> setLlmStatus(s) })).trim();
+    if (field === 'question') {
+      update({ question: corrected } as any);
+    } else {
+      const parsed = parseOptionsAnswerSnippet(corrected);
+      let finalAnswer = parsed.answer && parsed.answer.trim().length > 0 ? parsed.answer.trim() : (text ?? '');
+      finalAnswer = finalAnswer.replace(/^Answer\s*:\s*/i, '').trim();
+      if (!finalAnswer && text) {
+        finalAnswer = text.trim();
+      }
+      const patch: Partial<ProblemRecord> = { answer: finalAnswer };
+      if (parsed.options && current.questionType === 'Multiple Choice') {
+        patch.options = parsed.options;
+      }
+      update(patch);
+    }
     setLlmStatus('done');
   };
 
@@ -392,6 +503,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const loadLatexFrom = (field: 'question' | 'answer') => {
+    if (field === 'answer') {
+      const snippet = buildOptionsAnswerSnippet(current.answer ?? '', current.options ?? []);
+      setLatexInput(snippet);
+      return;
+    }
     const text = (current as any)[field] as string;
     setLatexInput(text || '');
   };
@@ -464,6 +580,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       }
     }
   };
+
+  const combinedOptionsAndAnswerFilled = hasOptionsOrAnswerContent();
 
   useEffect(() => { ensureOptionsForMC(); }, [current.questionType]);
   useEffect(() => { ensureOptionsForMC(); }, [defaults.optionsCount]);
@@ -565,6 +683,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       <div className="grid grid-2">
         <div>
           <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+            <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+              <div className="label" style={{margin:0, fontSize:'1.15rem', fontWeight:600}}>{t('questionInfoTitle')}</div>
+            </div>
             <div>
               <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
               <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
@@ -581,7 +702,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 <div className="small" style={{color:'var(--text-muted)'}}>{t('mathJaxPreviewLabel')}</div>
                 <div
                   ref={questionPreviewRef}
-                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48, whiteSpace:'pre-wrap'}}
                 />
                 {questionMathJaxError ? (
                   <span className="small" style={{color:'#f87171', display:'block', marginTop:4}}>{t('mathJaxPreviewError', { error: questionMathJaxError })}</span>
@@ -621,7 +742,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               <textarea value={current.answer} onChange={(e)=> update({ answer: e.target.value })} />
               <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
                 <div className="row" style={{gap:6, alignItems:'center'}}>
-                  <button onClick={() => fixLatex('answer')}>{t('latexFix')}</button>
+                  <button onClick={() => fixLatex('answer')} disabled={!combinedOptionsAndAnswerFilled}>{t('latexFix')}</button>
                   {(llmStatusSource === 'latex_answer' && llmStatus !== 'idle' && llmStatus !== 'done') && (
                     <span className="small">{llmStatus === 'waiting_response' ? t('waitingLLMResponse') : t('waitingLLMThinking')}{'.'.repeat(dots)}</span>
                   )}
@@ -632,11 +753,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 <div className="small" style={{color:'var(--text-muted)'}}>{t('mathJaxPreviewLabel')}</div>
                 <div
                   ref={answerPreviewRef}
-                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48, whiteSpace:'pre-wrap'}}
                 />
                 {answerMathJaxError ? (
                   <span className="small" style={{color:'#f87171', display:'block', marginTop:4}}>{t('mathJaxPreviewError', { error: answerMathJaxError })}</span>
-                ) : (!current.answer?.trim() ? (
+                ) : (!combinedOptionsAndAnswerFilled ? (
                   <span className="small" style={{color:'var(--text-muted)', display:'block', marginTop:4}}>{t('mathJaxPreviewEmpty')}</span>
                 ) : null)}
               </div>
@@ -885,7 +1006,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               {latexHasSource && (
                 <div
                   ref={latexPreviewRef}
-                  style={{marginTop:8, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                  style={{marginTop:8, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48, whiteSpace:'pre-wrap'}}
                 />
               )}
             </div>
