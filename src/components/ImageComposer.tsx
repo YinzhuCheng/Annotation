@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
-import { saveImageBlob } from '../lib/db';
+import { saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 
 type Block =
@@ -39,8 +39,16 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     return [];
   });
   const [previewUrl, setPreviewUrl] = useState<string>('');
-  const [composedPath, setComposedPath] = useState<string>('');
+  const [composedBlob, setComposedBlob] = useState<Blob | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   useEffect(() => {
     const lite = blocks.map((b) => (b.type === 'custom' ? { id: b.id, type: b.type, count: b.count, labelScheme: b.labelScheme } : { id: b.id, type: b.type }));
@@ -167,6 +175,11 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
 
   const compose = async () => {
     setIsComposing(true);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl('');
+    }
+    setComposedBlob(null);
     try {
       const targetWidth = 1000;
       const padding = 24;
@@ -387,8 +400,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
       }
 
       const blob = await new Promise<Blob>((resolve) => canvas.toBlob(b => resolve(b || new Blob()), 'image/jpeg', 0.92));
-      const path = await saveImageBlob(blob);
-      setComposedPath(path);
+      setComposedBlob(blob);
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
     } finally {
@@ -495,8 +507,24 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
           </div>
           <img className="preview" src={previewUrl} />
           <div className="row" style={{gap:8, marginTop:8}}>
-            <button onClick={()=> setPreviewUrl('')}>{t('regenerate')}</button>
-            <button className="primary" disabled={!composedPath} onClick={()=> { update({ id: problem.id, image: composedPath }); }}>{t('confirmImage')}</button>
+            <button onClick={()=> {
+              if (previewUrl) URL.revokeObjectURL(previewUrl);
+              setPreviewUrl('');
+              setComposedBlob(null);
+            }}>{t('regenerate')}</button>
+            <button
+              className="primary"
+              disabled={!composedBlob}
+              onClick={async () => {
+                if (!composedBlob) return;
+                const targetPath = `images/${problem.id}.jpg`;
+                await saveImageBlobAtPath(targetPath, composedBlob);
+                update({ id: problem.id, image: targetPath });
+                setComposedBlob(null);
+              }}
+            >
+              {t('confirmImage')}
+            </button>
           </div>
         </div>
       )}

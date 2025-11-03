@@ -7,7 +7,7 @@ import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
 
 const HEADER = [
-  'id','Question','Question_type','Options','Answer','Subfield','Source','Image','Image_dependency','Academic_Level','Difficulty'
+  'id','Question','Question_Type','Options','Answer','Subfield','Source','Image','Image_Dependency','Academic_Level','Difficulty'
 ];
 
 export function ImportExport() {
@@ -17,41 +17,68 @@ export function ImportExport() {
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
 
-  const exportXlsx = async () => {
-    // Build rows; Image column should contain the intended exported filename (<id>.jpg) when present
-    const rows = problems.map(p => ([
-      p.id,
-      p.question,
-      p.questionType,
-      (p.questionType === 'Multiple Choice') ? (JSON.stringify(
-        (p.options || []).map((opt, i) => {
+  const buildRows = () => problems.map(p => {
+    const question = String(p.question ?? '');
+    const questionType = p.questionType;
+    const optionsSerialized = questionType === 'Multiple Choice'
+      ? JSON.stringify((p.options || []).map((opt, i) => {
           const label = String.fromCharCode(65 + i);
           const trimmed = String(opt || '').trim();
           if (!trimmed) return '';
-          const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
+          const hasPrefix = new RegExp(`^${label}\s*:`).test(trimmed);
           return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-        })
-      )) : '',
-      p.answer,
-      p.subfield,
-      p.source,
-      p.image ? `${p.id}.jpg` : '',
-      p.image ? 1 : 0,
-      p.academicLevel,
-      p.difficulty,
-    ]));
-    const ws = XLSX.utils.aoa_to_sheet([HEADER, ...rows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    // Add hyperlink for Image column pointing to images/<id>.jpg
-    const imageColIndex = HEADER.indexOf('Image'); // 0-based
+        }))
+      : '';
+    const answer = String(p.answer ?? '');
+    const subfield = String(p.subfield ?? '');
+    const source = String(p.source ?? '');
+    const imageName = p.image ? `${p.id}.jpg` : '';
+    const imageDependency = p.image ? 1 : 0;
+    const academicLevel = String(p.academicLevel ?? '');
+    const difficulty = String(p.difficulty ?? '');
+    return [
+      p.id,
+      question,
+      questionType,
+      optionsSerialized,
+      answer,
+      subfield,
+      source,
+      imageName,
+      imageDependency,
+      academicLevel,
+      difficulty
+    ];
+  });
+
+  const createWorksheet = (rows: (string | number)[][]) => {
+    const data = [HEADER, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!ref'] = XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: data.length - 1, c: HEADER.length - 1 }
+    });
+    return ws;
+  };
+
+  const applyImageHyperlinks = (ws: XLSX.WorkSheet) => {
+    const imageColIndex = HEADER.indexOf('Image');
+    if (imageColIndex === -1) return;
     for (let i = 0; i < problems.length; i++) {
       const p = problems[i];
       if (!p.image) continue;
-      const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex }); // +1 for header row
-      const v = `${p.id}.jpg`;
-      (ws as any)[cellAddr] = { t: 's', v, l: { Target: `images/${v}`, Tooltip: v } };
+      const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex });
+      const fileName = `${p.id}.jpg`;
+      (ws as any)[cellAddr] = { t: 's', v: fileName, l: { Target: `images/${fileName}`, Tooltip: fileName } };
     }
+  };
+
+  const exportXlsx = async () => {
+    const rows = buildRows();
+    const ws = createWorksheet(rows);
+    applyImageHyperlinks(ws);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     const xlsxArrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([xlsxArrayBuffer as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     downloadBlob(blob, `dataset-${Date.now()}.xlsx`);
@@ -59,38 +86,11 @@ export function ImportExport() {
 
   // Export both XLSX and images into a single zip (Datasets)
   const exportDatasets = async () => {
-    const rows = problems.map(p => ([
-      p.id,
-      p.question,
-      p.questionType,
-      (p.questionType === 'Multiple Choice') ? (JSON.stringify(
-        (p.options || []).map((opt, i) => {
-          const label = String.fromCharCode(65 + i);
-          const trimmed = String(opt || '').trim();
-          if (!trimmed) return '';
-          const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
-          return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-        })
-      )) : '',
-      p.answer,
-      p.subfield,
-      p.source,
-      p.image ? `${p.id}.jpg` : '',
-      p.image ? 1 : 0,
-      p.academicLevel,
-      p.difficulty,
-    ]));
-    const ws = XLSX.utils.aoa_to_sheet([HEADER, ...rows]);
+    const rows = buildRows();
+    const ws = createWorksheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    const imageColIndex = HEADER.indexOf('Image');
-    for (let i = 0; i < problems.length; i++) {
-      const p = problems[i];
-      if (!p.image) continue;
-      const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex });
-      const v = `${p.id}.jpg`;
-      (ws as any)[cellAddr] = { t: 's', v, l: { Target: `images/${v}`, Tooltip: v } };
-    }
+    applyImageHyperlinks(ws);
     const xlsxArrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 
     const zip = new JSZip();
@@ -143,16 +143,23 @@ export function ImportExport() {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const arr = XLSX.utils.sheet_to_json<string[]> (ws, { header: 1 });
     const header = (arr[0] as string[]) || [];
-    const idx = (name: string) => header.indexOf(name);
+    const findIndex = (...names: string[]) => {
+      for (const name of names) {
+        const index = header.indexOf(name);
+        if (index !== -1) return index;
+      }
+      return -1;
+    };
     let count = 0;
     for (let i=1;i<arr.length;i++){
       const row = arr[i] as any[];
       if (!row?.length) continue;
-      const id = String(row[idx('id')] || `${Date.now()}`);
-      const question = String(row[idx('Question')] || '');
-      const questionType = String(row[idx('Question_type')] || 'Multiple Choice') as any;
+      const id = String(row[findIndex('id')] || `${Date.now()}`);
+      const question = String(row[findIndex('Question')] || '');
+      const questionType = String(row[findIndex('Question_Type', 'Question_type')] || 'Multiple Choice') as any;
       let options: string[] = [];
-      const optionsRaw = row[idx('Options')];
+      const optionsIdx = findIndex('Options');
+      const optionsRaw = optionsIdx !== -1 ? row[optionsIdx] : undefined;
       if (optionsRaw) {
         try { options = JSON.parse(optionsRaw); } catch {}
       }
@@ -166,13 +173,21 @@ export function ImportExport() {
       } else {
         options = [];
       }
-      const answer = String(row[idx('Answer')] || '');
-      const subfield = String(row[idx('Subfield')] || '');
-      const source = String(row[idx('Source')] || '');
-      const image = String(row[idx('Image')] || '');
+      const answer = String(row[findIndex('Answer')] || '');
+      const subfield = String(row[findIndex('Subfield')] || '');
+      const source = String(row[findIndex('Source')] || '');
+      const imageRaw = String(row[findIndex('Image')] || '').trim();
+      let image = '';
+      if (imageRaw) {
+        if (imageRaw.includes('/') || imageRaw.includes('\\')) {
+          image = imageRaw;
+        } else {
+          image = `images/${imageRaw}`;
+        }
+      }
       const imageDependency = image ? 1 : 0;
-      const academicLevel = String(row[idx('Academic_Level')] || 'K12') as any;
-      const difficulty = Number(row[idx('Difficulty')] || 1) as any;
+      const academicLevel = String(row[findIndex('Academic_Level')] || 'K12') as any;
+      const difficulty = String(row[findIndex('Difficulty')] || '1') as any;
       upsertProblem({ id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
       count++;
     }

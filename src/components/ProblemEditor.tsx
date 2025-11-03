@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
-import { getImageBlob } from '../lib/db';
+import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
 
@@ -608,16 +608,17 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
   const assistToolsHint = t('llmAssistGenerateHint');
+  const imageCellValue = current.image?.trim() ? `${current.id}.jpg` : '-';
   const previewContent = useMemo(() => {
     const lines: string[] = [];
-    lines.push(`${t('previewIdLabel')}: ${current.id}`);
-    lines.push(`${t('targetType')}: ${current.questionType || '-'}`);
+    lines.push(`${t('previewFieldId')}: ${current.id}`);
+    lines.push(`${t('previewFieldQuestionType')}: ${current.questionType || '-'}`);
     lines.push('');
-    lines.push(`${t('problemText')}:`);
+    lines.push(`${t('previewFieldQuestion')}:`);
     lines.push((current.question?.trim() || '-'));
     if (current.questionType === 'Multiple Choice') {
       lines.push('');
-      lines.push(`${t('options')}:`);
+      lines.push(`${t('previewFieldOptions')}:`);
       const optionCount = getOptionCount();
       const optionsList = Array.from({ length: optionCount }, (_, idx) => current.options?.[idx] ?? '');
       optionsList.forEach((opt, idx) => {
@@ -627,20 +628,36 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       });
     }
     lines.push('');
-    lines.push(`${t('answer')}:`);
+    lines.push(`${t('previewFieldAnswer')}:`);
     lines.push((current.answer?.trim() || '-'));
     lines.push('');
     const subfieldDisplay = selectedSubfields.length > 0
       ? selectedSubfields.join(', ')
       : (current.subfield?.trim() || '-');
-    lines.push(`${t('subfield')}: ${subfieldDisplay}`);
-    lines.push(`${t('source')}: ${current.source?.trim() || '-'}`);
-    lines.push(`${t('academic')}: ${current.academicLevel?.trim() || '-'}`);
-    lines.push(`${difficultyLabelDisplay}: ${current.difficulty?.trim() || '-'}`);
+    lines.push(`${t('previewFieldSubfield')}: ${subfieldDisplay}`);
+    lines.push(`${t('previewFieldSource')}: ${current.source?.trim() || '-'}`);
+    lines.push(`${t('previewFieldAcademicLevel')}: ${current.academicLevel?.trim() || '-'}`);
+    lines.push(`${t('previewFieldDifficulty')}: ${current.difficulty?.trim() || '-'}`);
+    lines.push(`${t('previewFieldImage')}: ${imageCellValue || '-'}`);
     lines.push(`${t('previewImageDependency')}: ${typeof current.imageDependency === 'number' ? current.imageDependency : 0}`);
-    lines.push(`${t('previewImageId')}: ${current.image?.trim() || '-'}`);
     return lines.join('\n');
-  }, [t, current.id, current.question, current.questionType, current.options, current.answer, current.subfield, current.source, current.academicLevel, current.difficulty, current.image, current.imageDependency, selectedSubfields, difficultyLabelDisplay, defaults.optionsCount]);
+  }, [t, current.id, current.question, current.questionType, current.options, current.answer, current.subfield, current.source, current.academicLevel, current.difficulty, current.imageDependency, selectedSubfields, imageCellValue, defaults.optionsCount]);
+
+  useEffect(() => {
+    const currentPath = current.image?.trim();
+    if (!currentPath || !currentPath.startsWith('images/')) return;
+    const desiredPath = `images/${current.id}.jpg`;
+    if (currentPath === desiredPath) return;
+    let cancelled = false;
+    (async () => {
+      const blob = await getImageBlob(currentPath);
+      if (!blob || cancelled) return;
+      await saveImageBlobAtPath(desiredPath, blob);
+      if (cancelled) return;
+      update({ image: desiredPath });
+    })();
+    return () => { cancelled = true; };
+  }, [current.image, current.id]);
 
   useEffect(() => {
     if (!showPreview) return;
@@ -744,7 +761,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
             <button onClick={goNext}>{t('next')}</button>
           </div>
-          <span className="small">{t('previewIdLabel')}: {current.id}</span>
+          <span className="small">{t('previewFieldId')}: {current.id}</span>
         </div>
 
         <hr className="div" style={{margin:'12px 0'}} />
@@ -764,7 +781,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div className="label" style={{margin:0}}>{t('previewImageSection')}</div>
             <div className="row" style={{gap:12, flexWrap:'wrap', alignItems:'center'}}>
               <span className="small">{t('previewImageDependency')}: {typeof current.imageDependency === 'number' ? current.imageDependency : 0}</span>
-              <span className="small">{t('previewImageId')}: {current.image?.trim() || '-'}</span>
+              <span className="small">{t('previewFieldImage')}: {imageCellValue}</span>
             </div>
             {current.image?.trim() ? (
               confirmedImageUrl ? (
@@ -772,7 +789,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   <img
                     src={confirmedImageUrl}
                     style={{maxWidth:'100%', maxHeight:240, borderRadius:8, border:'1px solid var(--border)', objectFit:'contain'}}
-                    alt={t('previewTitle') || 'preview image'}
+                    alt={`${t('previewFieldImage')}: ${imageCellValue}`}
                   />
                   <div className="row" style={{justifyContent:'flex-end'}}>
                     <button onClick={() => openViewer(confirmedImageUrl)}>{t('viewLarge')}</button>
