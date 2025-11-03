@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
@@ -48,6 +49,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrGeneratedName, setOcrGeneratedName] = useState('');
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ocrPasteTargetRef = useRef<HTMLTextAreaElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
@@ -361,6 +363,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => clearTimeout(timer);
   }, [savedAt]);
 
+  const focusHiddenPasteTarget = (ref: RefObject<HTMLTextAreaElement>) => {
+    const target = ref.current;
+    if (!target) return;
+    target.value = '';
+    target.focus({ preventScroll: true });
+    target.select();
+  };
+
   const onAddOcrImage = async (file: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
@@ -391,12 +401,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (target) await onAddOcrImage(target);
   };
 
-  const onPaste = async (e: React.ClipboardEvent) => {
-    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
-    if (item) {
-      const file = item.getAsFile();
-      if (file) await onAddOcrImage(file);
-    }
+  const handleOcrPaste = async (e: ReactClipboardEvent<Element>) => {
+    const files = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    await onAddOcrImage(files[0]);
   };
 
   const runOCR = async () => {
@@ -1179,8 +1188,22 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div>
               <div className="label" style={{marginBottom:4}}>{t('assistToolOcr')}</div>
               <div className="small" style={{color:'var(--text-muted)'}}>{t('uploadImage')}</div>
-              <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
+              <div
+                className="dropzone"
+                tabIndex={0}
+                onDrop={onDrop}
+                onDragOver={(e)=> e.preventDefault()}
+                onPaste={handleOcrPaste}
+                onContextMenu={() => focusHiddenPasteTarget(ocrPasteTargetRef)}
+              >
                 <div className="row" style={{justifyContent:'center', gap:8}}>
+                  <textarea
+                    ref={ocrPasteTargetRef}
+                    aria-hidden="true"
+                    onPaste={handleOcrPaste}
+                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+                    tabIndex={-1}
+                  />
                   <input
                     type="file"
                     accept="image/*"

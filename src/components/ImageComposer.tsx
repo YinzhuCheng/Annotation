@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { saveImageBlobAtPath } from '../lib/db';
@@ -42,6 +43,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [composedBlob, setComposedBlob] = useState<Blob | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+  const pasteTargetsRef = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   useEffect(() => {
     return () => {
@@ -83,6 +85,80 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     }));
   };
 
+  const addFilesToBlock = (blockId: string, files: File[]) => {
+    if (!files.length) return;
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+    const sorted = [...imageFiles].sort((a, b) => a.name.localeCompare(b.name));
+    setBlocks(prev => prev.map(b => {
+      if (b.id !== blockId) return b;
+      const normalized = sorted.map(file => normalizeFileForBlock(file, b.type));
+      if (!normalized.length) return b;
+      if (b.type === 'single') {
+        const next = [...b.files];
+        next[0] = normalized[0];
+        return { ...b, files: next } as Block;
+      }
+      if (b.type === 'options') {
+        const next = [...b.files];
+        let changed = false;
+        const maxSlots = 5;
+        for (const file of normalized) {
+          let idx = next.findIndex(entry => !entry);
+          if (idx === -1) {
+            if (next.length < maxSlots) {
+              next.push(file);
+              changed = true;
+            }
+          } else {
+            next[idx] = file;
+            changed = true;
+          }
+          if (next.length >= maxSlots && idx === -1) break;
+        }
+        if (!changed) return b;
+        return { ...b, files: next.slice(0, maxSlots) } as Block;
+      }
+      if (b.type === 'custom') {
+        const limit = (b as Extract<Block, { type: 'custom' }>).count;
+        const next = [...b.files];
+        let changed = false;
+        for (const file of normalized) {
+          let idx = next.findIndex((entry, index) => !entry && index < limit);
+          if (idx !== -1) {
+            next[idx] = file;
+            changed = true;
+            continue;
+          }
+          if (next.length < limit) {
+            next.push(file);
+            changed = true;
+          } else {
+            break;
+          }
+        }
+        if (!changed) return b;
+        return { ...(b as Block), files: next.slice(0, limit) } as Block;
+      }
+      return b;
+    }));
+  };
+
+  const focusPasteTarget = (blockId: string) => {
+    const target = pasteTargetsRef.current[blockId];
+    if (!target) return;
+    target.value = '';
+    target.focus({ preventScroll: true });
+    target.select();
+  };
+
+  const handlePasteToBlock = (blockId: string) => async (e: ReactClipboardEvent<Element>) => {
+    const files = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    addFilesToBlock(blockId, files);
+  };
+
   const removeBlock = (blockId: string) => {
     setBlocks(prev => prev.filter(b => b.id !== blockId));
   };
@@ -90,53 +166,27 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const onDropToOptions = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        const next = [...b.files];
-        for (const f of files) {
-          if (next.length >= 5) break;
-          next.push(normalizeFileForBlock(f, b.type));
-        }
-        return { ...b, files: next } as Block;
-      }));
+      const fallback = Array.from(e.dataTransfer.files || []);
+      const files = (all.length ? all : fallback).filter(f => f.type.startsWith('image/'));
+      addFilesToBlock(blockId, files);
     });
   };
 
   const onDropToSingle = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        const next = [...b.files];
-        next[0] = normalizeFileForBlock(files[0], b.type);
-        return { ...b, files: next } as Block;
-      }));
+      const fallback = Array.from(e.dataTransfer.files || []);
+      const files = (all.length ? all : fallback).filter(f => f.type.startsWith('image/'));
+      addFilesToBlock(blockId, files);
     });
   };
 
   const onDropToCustom = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        if ((b as any).type !== 'custom') return b;
-        const limit = (b as any).count as number;
-        const next = [...b.files];
-        for (const f of files) {
-          if (next.length >= limit) break;
-          next.push(normalizeFileForBlock(f, b.type));
-        }
-        return { ...(b as any), files: next } as Block;
-      }));
+      const fallback = Array.from(e.dataTransfer.files || []);
+      const files = (all.length ? all : fallback).filter(f => f.type.startsWith('image/'));
+      addFilesToBlock(blockId, files);
     });
   };
 
@@ -432,83 +482,137 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
       </div>
 
       <div className="grid" style={{gap:12, gridTemplateColumns:'1fr'}}>
-        {blocks.map((b, idx) => (
-          <div key={b.id} className="card">
-            <div className="row" style={{justifyContent:'space-between', marginBottom:8}}>
-              <strong>{b.type === 'single' ? t('singleBlock') : b.type === 'options' ? t('optionBlock') : t('customBlock')}</strong>
-              <button onClick={() => removeBlock(b.id)}>?</button>
-            </div>
-            {b.type === 'single' ? (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>
-                <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
-                  {/* Hide native file input to avoid OS-language labels */}
-                  <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) setFile(b.id, 0, f);
-                    e.target.value = '';
-                  }} />
-                  <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                  {b.files[0] && (<span className="small">{t('selectedFile')} {(b.files[0] as File).name || t('imageAttached')}</span>)}
-                  <span className="small">{t('dragDropOrChooseImage')}</span>
-                </div>
+        {blocks.map((b, idx) => {
+          const pasteHandler = handlePasteToBlock(b.id);
+          return (
+            <div key={b.id} className="card">
+              <div className="row" style={{justifyContent:'space-between', marginBottom:8}}>
+                <strong>{b.type === 'single' ? t('singleBlock') : b.type === 'options' ? t('optionBlock') : t('customBlock')}</strong>
+                <button onClick={() => removeBlock(b.id)}>?</button>
               </div>
-            ) : b.type === 'options' ? (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToOptions(e, b.id)}>
-                <div className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
-                  {[0,1,2,3,4].map(i => (
-                    <div key={i}>
-                      <div className="small">({String.fromCharCode(65 + i)})</div>
-                      <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                        const f = e.target.files?.[0];
-                        if (f) setFile(b.id, i, f);
-                        e.target.value = '';
-                      }} />
-                      <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                      {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
-                    </div>
-                  ))}
+              {b.type === 'single' ? (
+                <div
+                  className="dropzone"
+                  tabIndex={0}
+                  onDragOver={(e)=> e.preventDefault()}
+                  onDrop={(e)=> onDropToSingle(e, b.id)}
+                  onPaste={pasteHandler}
+                  onContextMenu={() => focusPasteTarget(b.id)}
+                >
+                  <textarea
+                    ref={(el) => {
+                      if (el) pasteTargetsRef.current[b.id] = el;
+                      else delete pasteTargetsRef.current[b.id];
+                    }}
+                    aria-hidden="true"
+                    onPaste={pasteHandler}
+                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+                    tabIndex={-1}
+                  />
+                  <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
+                    {/* Hide native file input to avoid OS-language labels */}
+                    <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
+                      const f = e.target.files?.[0];
+                      if (f) setFile(b.id, 0, f);
+                      e.target.value = '';
+                    }} />
+                    <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
+                    {b.files[0] && (<span className="small">{t('selectedFile')} {(b.files[0] as File).name || t('imageAttached')}</span>)}
+                    <span className="small">{t('dragDropOrChooseImage')}</span>
+                  </div>
                 </div>
-                <div className="row" style={{justifyContent:'center', marginTop:8}}>
-                  <span className="small">{t('dragDropMultiple')}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToCustom(e, b.id)}>
-                {b.type === 'custom' && (
-                  <>
-                    <div className="row" style={{gap:12, justifyContent:'center', alignItems:'center', marginBottom:8}}>
-                      <label className="small">{t('count')} <input type="number" min={1} max={26} value={b.count} onChange={(e)=>{
-                        const val = Math.max(1, Math.min(26, parseInt(e.target.value || '1', 10)));
-                        setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), count: val } as Block) : bb));
-                      }} style={{width:72, marginLeft:6}} /></label>
-                      <div className="row" style={{gap:8, alignItems:'center'}}>
-                        <label className="small"><input type="radio" name={"label-"+b.id} checked={(b as any).labelScheme==='letters'} onChange={()=> setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), labelScheme: 'letters' } as Block) : bb))} /> {t('lettersLower')}</label>
-                        <label className="small"><input type="radio" name={"label-"+b.id} checked={(b as any).labelScheme==='numbers'} onChange={()=> setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), labelScheme: 'numbers' } as Block) : bb))} /> {t('numbersParen')}</label>
+              ) : b.type === 'options' ? (
+                <div
+                  className="dropzone"
+                  tabIndex={0}
+                  onDragOver={(e)=> e.preventDefault()}
+                  onDrop={(e)=> onDropToOptions(e, b.id)}
+                  onPaste={pasteHandler}
+                  onContextMenu={() => focusPasteTarget(b.id)}
+                >
+                  <textarea
+                    ref={(el) => {
+                      if (el) pasteTargetsRef.current[b.id] = el;
+                      else delete pasteTargetsRef.current[b.id];
+                    }}
+                    aria-hidden="true"
+                    onPaste={pasteHandler}
+                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+                    tabIndex={-1}
+                  />
+                  <div className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
+                    {[0,1,2,3,4].map(i => (
+                      <div key={i}>
+                        <div className="small">({String.fromCharCode(65 + i)})</div>
+                        <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
+                          const f = e.target.files?.[0];
+                          if (f) setFile(b.id, i, f);
+                          e.target.value = '';
+                        }} />
+                        <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
+                        {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
                       </div>
-                    </div>
-                    <div className="grid" style={{gridTemplateColumns:`repeat(${Math.min((b as any).count, 5)}, 1fr)`, gap:8}}>
-                      {Array.from({ length: (b as any).count }).map((_, i) => (
-                        <div key={i}>
-                          <div className="small">{(b as any).labelScheme === 'numbers' ? `(${i+1})` : String.fromCharCode(97 + i)}</div>
-                          <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                            const f = e.target.files?.[0];
-                            if (f) setFile(b.id, i, f);
-                            e.target.value = '';
-                          }} />
-                          <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                          {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
+                    ))}
+                  </div>
+                  <div className="row" style={{justifyContent:'center', marginTop:8}}>
+                    <span className="small">{t('dragDropMultiple')}</span>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="dropzone"
+                  tabIndex={0}
+                  onDragOver={(e)=> e.preventDefault()}
+                  onDrop={(e)=> onDropToCustom(e, b.id)}
+                  onPaste={pasteHandler}
+                  onContextMenu={() => focusPasteTarget(b.id)}
+                >
+                  <textarea
+                    ref={(el) => {
+                      if (el) pasteTargetsRef.current[b.id] = el;
+                      else delete pasteTargetsRef.current[b.id];
+                    }}
+                    aria-hidden="true"
+                    onPaste={pasteHandler}
+                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+                    tabIndex={-1}
+                  />
+                  {b.type === 'custom' && (
+                    <>
+                      <div className="row" style={{gap:12, justifyContent:'center', alignItems:'center', marginBottom:8}}>
+                        <label className="small">{t('count')} <input type="number" min={1} max={26} value={b.count} onChange={(e)=>{
+                          const val = Math.max(1, Math.min(26, parseInt(e.target.value || '1', 10)));
+                          setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), count: val } as Block) : bb));
+                        }} style={{width:72, marginLeft:6}} /></label>
+                        <div className="row" style={{gap:8, alignItems:'center'}}>
+                          <label className="small"><input type="radio" name={"label-"+b.id} checked={(b as any).labelScheme==='letters'} onChange={()=> setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), labelScheme: 'letters' } as Block) : bb))} /> {t('lettersLower')}</label>
+                          <label className="small"><input type="radio" name={"label-"+b.id} checked={(b as any).labelScheme==='numbers'} onChange={()=> setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), labelScheme: 'numbers' } as Block) : bb))} /> {t('numbersParen')}</label>
                         </div>
-                      ))}
-                    </div>
-                    <div className="row" style={{justifyContent:'center', marginTop:8}}>
-                      <span className="small">{t('dragDropMultipleCustom')}</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+                      </div>
+                      <div className="grid" style={{gridTemplateColumns:`repeat(${Math.min((b as any).count, 5)}, 1fr)`, gap:8}}>
+                        {Array.from({ length: (b as any).count }).map((_, i) => (
+                          <div key={i}>
+                            <div className="small">{(b as any).labelScheme === 'numbers' ? `(${i+1})` : String.fromCharCode(97 + i)}</div>
+                            <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
+                              const f = e.target.files?.[0];
+                              if (f) setFile(b.id, i, f);
+                              e.target.value = '';
+                            }} />
+                            <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
+                            {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="row" style={{justifyContent:'center', marginTop:8}}>
+                        <span className="small">{t('dragDropMultipleCustom')}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {previewUrl && (

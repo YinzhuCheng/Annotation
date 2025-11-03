@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
@@ -16,10 +17,20 @@ export function ImportExport() {
   const { problems, upsertProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imagesFolderInputRef = useRef<HTMLInputElement>(null);
+  const xlsxPasteTargetRef = useRef<HTMLTextAreaElement>(null);
+  const imagesPasteTargetRef = useRef<HTMLTextAreaElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
   const [lastXlsxGeneratedName, setLastXlsxGeneratedName] = useState('');
   const [lastImagesGeneratedName, setLastImagesGeneratedName] = useState('');
+
+  const focusHiddenPasteTarget = (ref: RefObject<HTMLTextAreaElement>) => {
+    const target = ref.current;
+    if (!target) return;
+    target.value = '';
+    target.focus({ preventScroll: true });
+    target.select();
+  };
 
   const buildRows = () => problems.map(p => {
     const question = String(p.question ?? '');
@@ -216,6 +227,29 @@ export function ImportExport() {
     return count;
   };
 
+  const handleXlsxFiles = async (files: File[]) => {
+    if (!files.length) return 0;
+    let total = 0;
+    for (const f of files) {
+      total += await importXlsx(f);
+    }
+    if (total > 0) {
+      setImportedCount(total);
+      setLastXlsxGeneratedName(formatTimestampName({ prefix: 'xlsx', extension: 'xlsx' }));
+    }
+    return total;
+  };
+
+  const handleImageFiles = async (files: File[]) => {
+    if (!files.length) return 0;
+    const c = await importImagesFromFiles(files);
+    if (c > 0) {
+      setImportedImagesCount(c);
+      setLastImagesGeneratedName(formatTimestampName({ prefix: 'images' }));
+    }
+    return c;
+  };
+
   const extractFilesFromItems = (items: DataTransferItemList | undefined | null): File[] => {
     if (!items || !items.length) return [];
     const files: File[] = [];
@@ -273,14 +307,7 @@ export function ImportExport() {
     e.preventDefault();
     const droppedItems = extractFilesFromItems(e.dataTransfer.items);
     const files = (droppedItems.length ? droppedItems : Array.from(e.dataTransfer.files || [])).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
-    let total = 0;
-    for (const f of files) {
-      total += await importXlsx(f);
-    }
-    if (total > 0) {
-      setImportedCount(total);
-      setLastXlsxGeneratedName(formatTimestampName({ prefix: 'xlsx', extension: 'xlsx' }));
-    }
+    await handleXlsxFiles(files);
   };
 
   const onDropImages = async (e: React.DragEvent) => {
@@ -288,11 +315,21 @@ export function ImportExport() {
     const { files: dropped, hasDirectory } = await collectDirectoryFiles(e.dataTransfer.items);
     if (!hasDirectory) return;
     const files = dropped.filter(f => /\.(jpg|jpeg)$/i.test(f.name));
-    const c = await importImagesFromFiles(files);
-    if (c > 0) {
-      setImportedImagesCount(c);
-      setLastImagesGeneratedName(formatTimestampName({ prefix: 'images' }));
-    }
+    await handleImageFiles(files);
+  };
+
+  const onPasteXlsx = async (e: ReactClipboardEvent<Element>) => {
+    const files = Array.from(e.clipboardData?.files || []).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
+    if (!files.length) return;
+    e.preventDefault();
+    await handleXlsxFiles(files);
+  };
+
+  const onPasteImages = async (e: ReactClipboardEvent<Element>) => {
+    const files = Array.from(e.clipboardData?.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+    if (!files.length) return;
+    e.preventDefault();
+    await handleImageFiles(files);
   };
 
   return (
@@ -303,8 +340,23 @@ export function ImportExport() {
         <button onClick={exportDatasets}>{t('exportDatasets')}</button>
       </div>
 
-      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropXlsx} style={{padding:'8px 12px'}}>
+      <div
+        className="dropzone"
+        tabIndex={0}
+        onDragOver={(e)=> e.preventDefault()}
+        onDrop={onDropXlsx}
+        onPaste={onPasteXlsx}
+        onContextMenu={() => focusHiddenPasteTarget(xlsxPasteTargetRef)}
+        style={{padding:'8px 12px'}}
+      >
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+          <textarea
+            ref={xlsxPasteTargetRef}
+            aria-hidden="true"
+            onPaste={onPasteXlsx}
+            style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+            tabIndex={-1}
+          />
           <input
             ref={fileInputRef}
             type="file"
@@ -313,11 +365,7 @@ export function ImportExport() {
             onChange={async (e)=>{
               const f = e.target.files?.[0];
               if (f) {
-                const c = await importXlsx(f);
-                if (c > 0) {
-                  setImportedCount(c);
-                  setLastXlsxGeneratedName(formatTimestampName({ prefix: 'xlsx', extension: 'xlsx' }));
-                }
+                await handleXlsxFiles([f]);
                 e.target.value = '';
               }
             }}
@@ -337,8 +385,23 @@ export function ImportExport() {
         </div>
       </div>
 
-      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropImages} style={{padding:'8px 12px'}}>
+      <div
+        className="dropzone"
+        tabIndex={0}
+        onDragOver={(e)=> e.preventDefault()}
+        onDrop={onDropImages}
+        onPaste={onPasteImages}
+        onContextMenu={() => focusHiddenPasteTarget(imagesPasteTargetRef)}
+        style={{padding:'8px 12px'}}
+      >
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+          <textarea
+            ref={imagesPasteTargetRef}
+            aria-hidden="true"
+            onPaste={onPasteImages}
+            style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
+            tabIndex={-1}
+          />
           <input
             type="file"
             style={{display:'none'}}
@@ -353,11 +416,7 @@ export function ImportExport() {
             onChange={async (e)=>{
               const files = Array.from(e.target.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
               if (files.length === 0) return;
-              const c = await importImagesFromFiles(files);
-              if (c > 0) {
-                setImportedImagesCount(c);
-                setLastImagesGeneratedName(formatTimestampName({ prefix: 'images' }));
-              }
+              await handleImageFiles(files);
               e.target.value = '';
             }}
           />
