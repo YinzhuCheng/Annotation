@@ -18,6 +18,9 @@ export default function App() {
   const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
   const { mode } = useAppStore();
   const [page, setPage] = useState<Page>('main');
+  const [showSettings, setShowSettings] = useState(true);
+  const [showProblems, setShowProblems] = useState(true);
+  const [showImages, setShowImages] = useState(true);
 
   useEffect(() => {
     estimateStorage().then(setStorageInfo).catch(() => setStorageInfo(null));
@@ -86,23 +89,67 @@ export default function App() {
 
         <div className="card">
           <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
-            <div className="label">{t('settingsBlock')}</div>
+            <div className="row" style={{gap:8, alignItems:'center'}}>
+              <div className="label">{t('settingsBlock')}</div>
+              <button
+                onClick={()=> setShowSettings((prev) => !prev)}
+                aria-expanded={showSettings}
+                aria-controls="settings-panel"
+              >
+                {showSettings ? t('collapseSection') : t('expandSection')}
+              </button>
+            </div>
             <div className="row" style={{gap:8}}>
               <button onClick={()=> setPage('defaults')}>{t('editDefaults')}</button>
             </div>
           </div>
-          <LLMConfig />
-          <hr className="div" />
-          <ImportExport />
+          {showSettings && (
+            <div id="settings-panel">
+              <LLMConfig />
+              <hr className="div" />
+              <ImportExport />
+            </div>
+          )}
         </div>
 
         <div className="card" style={{marginTop:16}}>
-          <div className="label">{t('problemsBlock')}</div>
-          <ProblemEditor onOpenClear={()=> setPage('clear')} />
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+            <div className="row" style={{gap:8, alignItems:'center'}}>
+              <div className="label">{t('problemsBlock')}</div>
+              <button
+                onClick={()=> setShowProblems((prev) => !prev)}
+                aria-expanded={showProblems}
+                aria-controls="problems-panel"
+              >
+                {showProblems ? t('collapseSection') : t('expandSection')}
+              </button>
+            </div>
+          </div>
+          {showProblems && (
+            <div id="problems-panel">
+              <ProblemEditor onOpenClear={()=> setPage('clear')} />
+            </div>
+          )}
         </div>
 
         <div className="card" style={{marginTop: 16}}>
-          <ImageComposer />
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+            <div className="row" style={{gap:8, alignItems:'center'}}>
+              <div className="label">{t('imageBlock')}</div>
+              <button
+                onClick={()=> setShowImages((prev) => !prev)}
+                aria-expanded={showImages}
+                aria-controls="images-panel"
+              >
+                {showImages ? t('collapseSection') : t('expandSection')}
+              </button>
+            </div>
+          </div>
+          {showImages && (
+            <div id="images-panel">
+              <ImageComposer showHeader={false} />
+            </div>
+          )}
         </div>
       </div>
 

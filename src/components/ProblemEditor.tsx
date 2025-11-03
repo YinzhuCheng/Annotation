@@ -49,6 +49,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
+  const questionPreviewRef = useRef<HTMLDivElement>(null);
+  const answerPreviewRef = useRef<HTMLDivElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'latex_preview' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
@@ -64,6 +66,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexInput, setLatexInput] = useState('');
   const [latexRenderError, setLatexRenderError] = useState('');
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
+  const [questionMathJaxError, setQuestionMathJaxError] = useState('');
+  const [answerMathJaxError, setAnswerMathJaxError] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -123,6 +127,68 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLatexRenderError('');
     setLatexErrors([]);
   }, [current.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const render = async () => {
+      const container = questionPreviewRef.current;
+      if (!container) return;
+      container.innerHTML = '';
+      setQuestionMathJaxError('');
+      const source = current.question?.trim() ?? '';
+      if (!source) return;
+      container.textContent = source;
+      try {
+        const mj = await ensureMathJaxReady();
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        if (errors.length > 0) {
+          setQuestionMathJaxError(errors.join('; '));
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setQuestionMathJaxError(message);
+      }
+    };
+    render();
+    return () => { cancelled = true; };
+  }, [current.question]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const render = async () => {
+      const container = answerPreviewRef.current;
+      if (!container) return;
+      container.innerHTML = '';
+      setAnswerMathJaxError('');
+      const source = current.answer?.trim() ?? '';
+      if (!source) return;
+      container.textContent = source;
+      try {
+        const mj = await ensureMathJaxReady();
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        if (errors.length > 0) {
+          setAnswerMathJaxError(errors.join('; '));
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setAnswerMathJaxError(message);
+      }
+    };
+    render();
+    return () => { cancelled = true; };
+  }, [current.answer]);
 
   useEffect(() => {
     if (!feedbackSavedAt) return;
@@ -511,6 +577,18 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </div>
                 <span className="small">{t('latexFixHint')}</span>
               </div>
+              <div style={{marginTop:8}}>
+                <div className="small" style={{color:'var(--text-muted)'}}>{t('mathJaxPreviewLabel')}</div>
+                <div
+                  ref={questionPreviewRef}
+                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                />
+                {questionMathJaxError ? (
+                  <span className="small" style={{color:'#f87171', display:'block', marginTop:4}}>{t('mathJaxPreviewError', { error: questionMathJaxError })}</span>
+                ) : (!current.question?.trim() ? (
+                  <span className="small" style={{color:'var(--text-muted)', display:'block', marginTop:4}}>{t('mathJaxPreviewEmpty')}</span>
+                ) : null)}
+              </div>
             </div>
 
             <div>
@@ -549,6 +627,18 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   )}
                 </div>
                 <span className="small">{t('latexFixHint')}</span>
+              </div>
+              <div style={{marginTop:8}}>
+                <div className="small" style={{color:'var(--text-muted)'}}>{t('mathJaxPreviewLabel')}</div>
+                <div
+                  ref={answerPreviewRef}
+                  style={{marginTop:4, padding:12, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:48}}
+                />
+                {answerMathJaxError ? (
+                  <span className="small" style={{color:'#f87171', display:'block', marginTop:4}}>{t('mathJaxPreviewError', { error: answerMathJaxError })}</span>
+                ) : (!current.answer?.trim() ? (
+                  <span className="small" style={{color:'var(--text-muted)', display:'block', marginTop:4}}>{t('mathJaxPreviewEmpty')}</span>
+                ) : null)}
               </div>
             </div>
             <div>

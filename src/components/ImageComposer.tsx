@@ -18,7 +18,7 @@ function readImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-export function ImageComposer() {
+export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { t } = useTranslation();
   const problem = useAppStore((s) => s.problems.find(p => p.id === s.currentId)!);
   const update = useAppStore((s) => s.upsertProblem);
@@ -398,7 +398,9 @@ export function ImageComposer() {
 
   return (
     <div>
-      <div className="label">{t('imageBlock')}</div>
+      {showHeader && (
+        <div className="label">{t('imageBlock')}</div>
+      )}
       <div className="row" style={{gap:8}}>
         <button onClick={() => addBlock('single')}>{t('singleBlock')}</button>
         <button onClick={() => addBlock('options')}>{t('optionBlock')}</button>
@@ -411,7 +413,7 @@ export function ImageComposer() {
           <div key={b.id} className="card">
             <div className="row" style={{justifyContent:'space-between', marginBottom:8}}>
               <strong>{b.type === 'single' ? t('singleBlock') : b.type === 'options' ? t('optionBlock') : t('customBlock')}</strong>
-              <button onClick={() => removeBlock(b.id)}>✕</button>
+              <button onClick={() => removeBlock(b.id)}>?</button>
             </div>
             {b.type === 'single' ? (
               <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>

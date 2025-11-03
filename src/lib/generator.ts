@@ -420,8 +420,9 @@ export async function generateProblemFromText(
   userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
   userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
   userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
-  userLines.push('3. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
-  userLines.push('4. Integrate insights from all prior rounds instead of restarting from scratch.');
+  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions.');
+  userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
+  userLines.push('5. Integrate insights from all prior rounds instead of restarting from scratch.');
   userLines.push('');
 
   userLines.push('## Output Contract');
