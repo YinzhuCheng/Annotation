@@ -5,6 +5,7 @@ import { useAppStore } from '../state/store';
 import { saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { cloneFileWithTimestamp } from '../lib/fileNames';
+import { extractClipboardFiles, preventPrintableInput } from '../lib/clipboard';
 
 type Block =
   | { id: string; type: 'single'; files: (File | Blob)[] }
@@ -43,7 +44,6 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [composedBlob, setComposedBlob] = useState<Blob | null>(null);
   const [isComposing, setIsComposing] = useState(false);
-  const pasteTargetsRef = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   useEffect(() => {
     return () => {
@@ -144,16 +144,8 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     }));
   };
 
-  const focusPasteTarget = (blockId: string) => {
-    const target = pasteTargetsRef.current[blockId];
-    if (!target) return;
-    target.value = '';
-    target.focus({ preventScroll: true });
-    target.select();
-  };
-
   const handlePasteToBlock = (blockId: string) => async (e: ReactClipboardEvent<Element>) => {
-    const files = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+    const files = extractClipboardFiles(e, (file) => file.type.startsWith('image/'));
     if (!files.length) return;
     e.preventDefault();
     addFilesToBlock(blockId, files);
@@ -493,23 +485,16 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               {b.type === 'single' ? (
                 <div
                   className="dropzone"
+                  contentEditable
+                  suppressContentEditableWarning
                   tabIndex={0}
                   onDragOver={(e)=> e.preventDefault()}
                   onDrop={(e)=> onDropToSingle(e, b.id)}
                   onPaste={pasteHandler}
-                  onContextMenu={() => focusPasteTarget(b.id)}
+                  onKeyDown={preventPrintableInput}
+                  style={{caretColor:'transparent'}}
                 >
-                  <textarea
-                    ref={(el) => {
-                      if (el) pasteTargetsRef.current[b.id] = el;
-                      else delete pasteTargetsRef.current[b.id];
-                    }}
-                    aria-hidden="true"
-                    onPaste={pasteHandler}
-                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-                    tabIndex={-1}
-                  />
-                  <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
+                  <div contentEditable={false} className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
                     {/* Hide native file input to avoid OS-language labels */}
                     <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                       const f = e.target.files?.[0];
@@ -524,23 +509,16 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               ) : b.type === 'options' ? (
                 <div
                   className="dropzone"
+                  contentEditable
+                  suppressContentEditableWarning
                   tabIndex={0}
                   onDragOver={(e)=> e.preventDefault()}
                   onDrop={(e)=> onDropToOptions(e, b.id)}
                   onPaste={pasteHandler}
-                  onContextMenu={() => focusPasteTarget(b.id)}
+                  onKeyDown={preventPrintableInput}
+                  style={{caretColor:'transparent'}}
                 >
-                  <textarea
-                    ref={(el) => {
-                      if (el) pasteTargetsRef.current[b.id] = el;
-                      else delete pasteTargetsRef.current[b.id];
-                    }}
-                    aria-hidden="true"
-                    onPaste={pasteHandler}
-                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-                    tabIndex={-1}
-                  />
-                  <div className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
+                  <div contentEditable={false} className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
                     {[0,1,2,3,4].map(i => (
                       <div key={i}>
                         <div className="small">({String.fromCharCode(65 + i)})</div>
@@ -561,25 +539,18 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               ) : (
                 <div
                   className="dropzone"
+                  contentEditable
+                  suppressContentEditableWarning
                   tabIndex={0}
                   onDragOver={(e)=> e.preventDefault()}
                   onDrop={(e)=> onDropToCustom(e, b.id)}
                   onPaste={pasteHandler}
-                  onContextMenu={() => focusPasteTarget(b.id)}
+                  onKeyDown={preventPrintableInput}
+                  style={{caretColor:'transparent'}}
                 >
-                  <textarea
-                    ref={(el) => {
-                      if (el) pasteTargetsRef.current[b.id] = el;
-                      else delete pasteTargetsRef.current[b.id];
-                    }}
-                    aria-hidden="true"
-                    onPaste={pasteHandler}
-                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-                    tabIndex={-1}
-                  />
                   {b.type === 'custom' && (
                     <>
-                      <div className="row" style={{gap:12, justifyContent:'center', alignItems:'center', marginBottom:8}}>
+                      <div contentEditable={false} className="row" style={{gap:12, justifyContent:'center', alignItems:'center', marginBottom:8}}>
                         <label className="small">{t('count')} <input type="number" min={1} max={26} value={b.count} onChange={(e)=>{
                           const val = Math.max(1, Math.min(26, parseInt(e.target.value || '1', 10)));
                           setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), count: val } as Block) : bb));
@@ -589,7 +560,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                           <label className="small"><input type="radio" name={"label-"+b.id} checked={(b as any).labelScheme==='numbers'} onChange={()=> setBlocks(prev => prev.map(bb => bb.id === b.id && (bb as any).type === 'custom' ? ({ ...(bb as any), labelScheme: 'numbers' } as Block) : bb))} /> {t('numbersParen')}</label>
                         </div>
                       </div>
-                      <div className="grid" style={{gridTemplateColumns:`repeat(${Math.min((b as any).count, 5)}, 1fr)`, gap:8}}>
+                      <div contentEditable={false} className="grid" style={{gridTemplateColumns:`repeat(${Math.min((b as any).count, 5)}, 1fr)`, gap:8}}>
                         {Array.from({ length: (b as any).count }).map((_, i) => (
                           <div key={i}>
                             <div className="small">{(b as any).labelScheme === 'numbers' ? `(${i+1})` : String.fromCharCode(97 + i)}</div>
@@ -603,7 +574,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                           </div>
                         ))}
                       </div>
-                      <div className="row" style={{justifyContent:'center', marginTop:8}}>
+                      <div contentEditable={false} className="row" style={{justifyContent:'center', marginTop:8}}>
                         <span className="small">{t('dragDropMultipleCustom')}</span>
                       </div>
                     </>

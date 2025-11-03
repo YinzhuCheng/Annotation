@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ClipboardEvent as ReactClipboardEvent, RefObject } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
@@ -7,6 +7,7 @@ import { downloadBlob } from '../lib/storage';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
 import { formatTimestampName } from '../lib/fileNames';
+import { extractClipboardFiles, preventPrintableInput } from '../lib/clipboard';
 
 const HEADER = [
   'id','Question','Question_Type','Options','Answer','Subfield','Source','Image','Image_Dependency','Academic_Level','Difficulty'
@@ -17,20 +18,12 @@ export function ImportExport() {
   const { problems, upsertProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imagesFolderInputRef = useRef<HTMLInputElement>(null);
-  const xlsxPasteTargetRef = useRef<HTMLTextAreaElement>(null);
-  const imagesPasteTargetRef = useRef<HTMLTextAreaElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
   const [lastXlsxGeneratedName, setLastXlsxGeneratedName] = useState('');
   const [lastImagesGeneratedName, setLastImagesGeneratedName] = useState('');
-
-  const focusHiddenPasteTarget = (ref: RefObject<HTMLTextAreaElement>) => {
-    const target = ref.current;
-    if (!target) return;
-    target.value = '';
-    target.focus({ preventScroll: true });
-    target.select();
-  };
+  const isXlsxFile = (file: File) => file.name.toLowerCase().endsWith('.xlsx');
+  const isJpegFile = (file: File) => /\.(jpg|jpeg)$/i.test(file.name);
 
   const buildRows = () => problems.map(p => {
     const question = String(p.question ?? '');
@@ -250,16 +243,6 @@ export function ImportExport() {
     return c;
   };
 
-  const extractFilesFromItems = (items: DataTransferItemList | undefined | null): File[] => {
-    if (!items || !items.length) return [];
-    const files: File[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const file = items[i].getAsFile();
-      if (file) files.push(file);
-    }
-    return files;
-  };
-
   const collectDirectoryFiles = async (items: DataTransferItemList | undefined | null): Promise<{ files: File[]; hasDirectory: boolean }> => {
     if (!items || !items.length) return { files: [], hasDirectory: false };
     const tasks: Promise<File[]>[] = [];
@@ -305,8 +288,7 @@ export function ImportExport() {
 
   const onDropXlsx = async (e: React.DragEvent) => {
     e.preventDefault();
-    const droppedItems = extractFilesFromItems(e.dataTransfer.items);
-    const files = (droppedItems.length ? droppedItems : Array.from(e.dataTransfer.files || [])).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
+    const files = Array.from(e.dataTransfer.files || []).filter(isXlsxFile);
     await handleXlsxFiles(files);
   };
 
@@ -314,19 +296,19 @@ export function ImportExport() {
     e.preventDefault();
     const { files: dropped, hasDirectory } = await collectDirectoryFiles(e.dataTransfer.items);
     if (!hasDirectory) return;
-    const files = dropped.filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+    const files = dropped.filter(isJpegFile);
     await handleImageFiles(files);
   };
 
   const onPasteXlsx = async (e: ReactClipboardEvent<Element>) => {
-    const files = Array.from(e.clipboardData?.files || []).filter(f => f.name.toLowerCase().endsWith('.xlsx'));
+    const files = extractClipboardFiles(e, isXlsxFile);
     if (!files.length) return;
     e.preventDefault();
     await handleXlsxFiles(files);
   };
 
   const onPasteImages = async (e: ReactClipboardEvent<Element>) => {
-    const files = Array.from(e.clipboardData?.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+    const files = extractClipboardFiles(e, isJpegFile);
     if (!files.length) return;
     e.preventDefault();
     await handleImageFiles(files);
@@ -342,21 +324,16 @@ export function ImportExport() {
 
       <div
         className="dropzone"
+        contentEditable
+        suppressContentEditableWarning
         tabIndex={0}
         onDragOver={(e)=> e.preventDefault()}
         onDrop={onDropXlsx}
         onPaste={onPasteXlsx}
-        onContextMenu={() => focusHiddenPasteTarget(xlsxPasteTargetRef)}
-        style={{padding:'8px 12px'}}
+        onKeyDown={preventPrintableInput}
+        style={{padding:'8px 12px', caretColor:'transparent'}}
       >
-        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
-          <textarea
-            ref={xlsxPasteTargetRef}
-            aria-hidden="true"
-            onPaste={onPasteXlsx}
-            style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-            tabIndex={-1}
-          />
+        <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
           <input
             ref={fileInputRef}
             type="file"
@@ -387,21 +364,16 @@ export function ImportExport() {
 
       <div
         className="dropzone"
+        contentEditable
+        suppressContentEditableWarning
         tabIndex={0}
         onDragOver={(e)=> e.preventDefault()}
         onDrop={onDropImages}
         onPaste={onPasteImages}
-        onContextMenu={() => focusHiddenPasteTarget(imagesPasteTargetRef)}
-        style={{padding:'8px 12px'}}
+        onKeyDown={preventPrintableInput}
+        style={{padding:'8px 12px', caretColor:'transparent'}}
       >
-        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
-          <textarea
-            ref={imagesPasteTargetRef}
-            aria-hidden="true"
-            onPaste={onPasteImages}
-            style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-            tabIndex={-1}
-          />
+        <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
           <input
             type="file"
             style={{display:'none'}}
@@ -414,7 +386,7 @@ export function ImportExport() {
             }}
             accept="image/jpeg,image/jpg"
             onChange={async (e)=>{
-              const files = Array.from(e.target.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
+              const files = Array.from(e.target.files || []).filter(isJpegFile);
               if (files.length === 0) return;
               await handleImageFiles(files);
               e.target.value = '';

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ClipboardEvent as ReactClipboardEvent, RefObject } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
@@ -7,6 +7,7 @@ import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import { cloneFileWithTimestamp } from '../lib/fileNames';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
+import { extractClipboardFiles, preventPrintableInput } from '../lib/clipboard';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -49,7 +50,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrGeneratedName, setOcrGeneratedName] = useState('');
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const ocrPasteTargetRef = useRef<HTMLTextAreaElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
@@ -363,14 +363,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => clearTimeout(timer);
   }, [savedAt]);
 
-  const focusHiddenPasteTarget = (ref: RefObject<HTMLTextAreaElement>) => {
-    const target = ref.current;
-    if (!target) return;
-    target.value = '';
-    target.focus({ preventScroll: true });
-    target.select();
-  };
-
   const onAddOcrImage = async (file: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
@@ -402,7 +394,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const handleOcrPaste = async (e: ReactClipboardEvent<Element>) => {
-    const files = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+    const files = extractClipboardFiles(e, (file) => file.type.startsWith('image/'));
     if (!files.length) return;
     e.preventDefault();
     await onAddOcrImage(files[0]);
@@ -1190,20 +1182,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               <div className="small" style={{color:'var(--text-muted)'}}>{t('uploadImage')}</div>
               <div
                 className="dropzone"
+                contentEditable
+                suppressContentEditableWarning
                 tabIndex={0}
                 onDrop={onDrop}
                 onDragOver={(e)=> e.preventDefault()}
                 onPaste={handleOcrPaste}
-                onContextMenu={() => focusHiddenPasteTarget(ocrPasteTargetRef)}
+                onKeyDown={preventPrintableInput}
+                style={{caretColor:'transparent'}}
               >
-                <div className="row" style={{justifyContent:'center', gap:8}}>
-                  <textarea
-                    ref={ocrPasteTargetRef}
-                    aria-hidden="true"
-                    onPaste={handleOcrPaste}
-                    style={{position:'absolute', left:'-9999px', top:0, width:1, height:1, opacity:0, border:0, padding:0}}
-                    tabIndex={-1}
-                  />
+                <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8}}>
                   <input
                     type="file"
                     accept="image/*"
