@@ -30,7 +30,7 @@ English | [中文](#中文说明)
 - Image paste/upload preview; composed image path written during export
 - Import/Export XLSX with header:
   ```
-  id	Question	Question_type	Options	Answer	Subfield	Source	Image	Image_dependency	Academic_Level	Difficulty
+  id	Question	Question_Type	Options	Answer	Subfield	Source	Image	Image_Dependency	Academic_Level	Difficulty
   ```
 
 ## Cloudflare Pages
@@ -69,7 +69,7 @@ English | [中文](#中文说明)
 - 图片粘贴/上传预览；导出时写入合成图片路径
 - 按如下表头导入/导出 XLSX：
   ```
-  id	Question	Question_type	Options	Answer	Subfield	Source	Image	Image_dependency	Academic_Level	Difficulty
+  id	Question	Question_Type	Options	Answer	Subfield	Source	Image	Image_Dependency	Academic_Level	Difficulty
   ```
 
 ### Cloudflare Pages
