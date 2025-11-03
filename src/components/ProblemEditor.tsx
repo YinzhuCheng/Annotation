@@ -637,8 +637,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     lines.push(`${t('source')}: ${current.source?.trim() || '-'}`);
     lines.push(`${t('academic')}: ${current.academicLevel?.trim() || '-'}`);
     lines.push(`${difficultyLabelDisplay}: ${current.difficulty?.trim() || '-'}`);
+    lines.push(`${t('previewImageDependency')}: ${typeof current.imageDependency === 'number' ? current.imageDependency : 0}`);
+    lines.push(`${t('previewImageId')}: ${current.image?.trim() || '-'}`);
     return lines.join('\n');
-  }, [t, current.id, current.question, current.questionType, current.options, current.answer, current.subfield, current.source, current.academicLevel, current.difficulty, selectedSubfields, difficultyLabelDisplay, defaults.optionsCount]);
+  }, [t, current.id, current.question, current.questionType, current.options, current.answer, current.subfield, current.source, current.academicLevel, current.difficulty, current.image, current.imageDependency, selectedSubfields, difficultyLabelDisplay, defaults.optionsCount]);
 
   useEffect(() => {
     if (!showPreview) return;
@@ -758,6 +760,31 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           ) : (!previewContent.trim() ? (
             <span className="small" style={{color:'var(--text-muted)'}}>{t('previewEmpty')}</span>
           ) : null)}
+          <div style={{display:'flex', flexDirection:'column', gap:8}}>
+            <div className="label" style={{margin:0}}>{t('previewImageSection')}</div>
+            <div className="row" style={{gap:12, flexWrap:'wrap', alignItems:'center'}}>
+              <span className="small">{t('previewImageDependency')}: {typeof current.imageDependency === 'number' ? current.imageDependency : 0}</span>
+              <span className="small">{t('previewImageId')}: {current.image?.trim() || '-'}</span>
+            </div>
+            {current.image?.trim() ? (
+              confirmedImageUrl ? (
+                <div style={{display:'flex', flexDirection:'column', gap:8}}>
+                  <img
+                    src={confirmedImageUrl}
+                    style={{maxWidth:'100%', maxHeight:240, borderRadius:8, border:'1px solid var(--border)', objectFit:'contain'}}
+                    alt={t('previewTitle') || 'preview image'}
+                  />
+                  <div className="row" style={{justifyContent:'flex-end'}}>
+                    <button onClick={() => openViewer(confirmedImageUrl)}>{t('viewLarge')}</button>
+                  </div>
+                </div>
+              ) : (
+                <span className="small" style={{color:'var(--text-muted)'}}>{t('previewImageLoading')}</span>
+              )
+            ) : (
+              <span className="small" style={{color:'var(--text-muted)'}}>{t('previewImageNone')}</span>
+            )}
+          </div>
         </div>
       </div>
     );
