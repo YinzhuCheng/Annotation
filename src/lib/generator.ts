@@ -27,38 +27,41 @@ const extractTagContent = (source: string, rawTag: string): string | null => {
   const closeIndex = lowerSource.indexOf(lowerClose, contentStart);
   if (closeIndex === -1) return null;
 
-  const inner = source.slice(contentStart, closeIndex);
-  const leadingTrimmed = inner.replace(/^\s*/, '');
-  const trailingTrimmed = leadingTrimmed.replace(/\s*$/, '');
+  const inner = source.slice(contentStart, closeIndex).trim();
+  if (!inner) return null;
 
-  const startBraceIndex = trailingTrimmed.indexOf('{{');
-  if (startBraceIndex === -1) {
-    return trailingTrimmed.trim() || null;
-  }
-
-  const contentStartIndex = startBraceIndex + 2;
-
-  const findClosingBraces = (): number => {
-    let searchIndex = trailingTrimmed.length;
-    while (searchIndex >= contentStartIndex + 2) {
-      const candidate = trailingTrimmed.lastIndexOf('}}', searchIndex);
-      if (candidate === -1) return -1;
-      const afterCandidate = trailingTrimmed.slice(candidate + 2);
-      if (afterCandidate.trim().length === 0) {
-        return candidate;
-      }
-      searchIndex = candidate - 1;
-    }
-    return -1;
+  const cleanResult = (value: string | null): string | null => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const withoutTrailing = trimmed.replace(/\s*}+\s*$/, '').trim();
+    return withoutTrailing || null;
   };
 
-  const endBraceIndex = findClosingBraces();
-  if (endBraceIndex === -1 || endBraceIndex < contentStartIndex) {
-    return trailingTrimmed.slice(contentStartIndex).trim() || null;
-  }
+  const extractBetween = (input: string, openSequence: string): string | null => {
+    const openIdx = input.indexOf(openSequence);
+    if (openIdx === -1) return null;
+    let depth = openSequence.length;
+    for (let i = openIdx + openSequence.length; i < input.length; i += 1) {
+      const ch = input[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          return input.slice(openIdx + openSequence.length, i);
+        }
+      }
+    }
+    return input.slice(openIdx + openSequence.length);
+  };
 
-  const between = trailingTrimmed.slice(contentStartIndex, endBraceIndex);
-  return between.trim() || null;
+  const fromDouble = cleanResult(extractBetween(inner, '{{'));
+  if (fromDouble !== null) return fromDouble;
+
+  const fromSingle = cleanResult(extractBetween(inner, '{'));
+  if (fromSingle !== null) return fromSingle;
+
+  return cleanResult(inner) || null;
 };
 
 const normalizeKey = (input: string): string => input
@@ -170,9 +173,13 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   while (idx < lines.length) {
     const rawLine = lines[idx];
     const trimmed = rawLine.trim();
-    if (trimmed === '') {
+    if (!trimmed) {
       idx += 1;
       break;
+    }
+    if (/^}+$/.test(trimmed)) {
+      idx += 1;
+      continue;
     }
 
     const kvMatch = trimmed.match(/^([\w-]+)\s*:\s*(.*)$/);
@@ -205,6 +212,12 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   for (; idx < lines.length; idx += 1) {
     const rawLine = lines[idx].replace(/\r$/, '');
     const trimmed = rawLine.trimEnd();
+    if (/^}+$/.test(trimmed.trim())) {
+      if (currentSection === 'answer') {
+        currentSection = null;
+      }
+      continue;
+    }
     const sectionMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9 _-]*)\s*:\s*(.*)$/);
     if (sectionMatch) {
       const key = normalizeKey(sectionMatch[1]);
@@ -213,12 +226,18 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
       const remainder = sectionMatch[2];
       if (remainder) {
         sections[key].push(remainder.trim());
+        if (key === 'answer') {
+          currentSection = null;
+        }
+      } else if (key === 'answer') {
+        currentSection = 'answer';
       }
       continue;
     }
 
     if (currentSection) {
       sections[currentSection].push(rawLine);
+      continue;
     }
   }
 
@@ -260,7 +279,8 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   result.question = getSectionText('question');
   result.questionType = typeHeader;
   result.options = options;
-  result.answer = getSectionText('answer') || answerHeader;
+  const answerBlock = getSectionText('answer') || answerHeader;
+  result.answer = answerBlock.replace(/\s*}+\s*$/, '').trim();
   result.subfield = getSectionText('subfield') || getSectionText('subfields') || subfieldHeader;
   result.academicLevel = getSectionText('academic_level') || getSectionText('academic') || getSectionText('academiclevel') || academicHeader;
   result.difficulty = getSectionText('difficulty') || difficultyHeader;

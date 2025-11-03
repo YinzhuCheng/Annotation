@@ -294,20 +294,24 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       setLlmStatus('done');
     } catch (err: any) {
       console.error('Generate with LLM failed:', err);
-      let alertMessage = err?.message ? String(err.message) : String(err);
+      const baseMessage = err?.message ? String(err.message) : String(err);
+      const rawText = typeof err?.raw === 'string' ? err.raw : '';
+      const rawTrimmed = rawText.trim();
+      const displayMessage = typeof err?.displayMessage === 'string'
+        ? err.displayMessage
+        : (rawTrimmed ? `${baseMessage}\n\n${rawText}` : null);
 
-      if (err instanceof LLMGenerationError) {
-        const display = err.displayMessage ?? alertMessage;
-        setGeneratorPreview(display);
-        alertMessage = display;
+      if (displayMessage) {
+        setGeneratorPreview(displayMessage);
+        alert(displayMessage);
       } else {
-        const display = `Error: ${alertMessage}`;
-        setGeneratorPreview(display);
+        const fallback = `Error: ${baseMessage}`;
+        setGeneratorPreview(fallback);
+        alert(fallback);
       }
 
       setLlmStatus('idle');
       setLlmStatusSource(null);
-      alert(alertMessage);
     }
   };
 
