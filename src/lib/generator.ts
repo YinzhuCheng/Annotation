@@ -276,11 +276,15 @@ export interface GeneratorConversationTurn {
 
 export class LLMGenerationError extends Error {
   raw: string;
+  displayMessage: string;
 
   constructor(message: string, raw: string, cause?: unknown) {
     super(message);
     this.name = 'LLMGenerationError';
-    this.raw = raw;
+    const normalizedRaw = typeof raw === 'string' ? raw : '';
+    const trimmedRaw = normalizedRaw.trim();
+    this.raw = normalizedRaw;
+    this.displayMessage = trimmedRaw ? `${message}\n\n${normalizedRaw}` : message;
     if (cause !== undefined) {
       (this as any).cause = cause;
     }

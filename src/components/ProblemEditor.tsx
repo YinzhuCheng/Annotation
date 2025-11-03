@@ -293,17 +293,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       setFeedbackSavedAt(null);
       setLlmStatus('done');
     } catch (err: any) {
-      const message = err?.message ? String(err.message) : String(err);
       console.error('Generate with LLM failed:', err);
+      let alertMessage = err?.message ? String(err.message) : String(err);
+
       if (err instanceof LLMGenerationError) {
-        const combined = err.raw?.trim() ? `${message}\n\n${err.raw}` : message;
-        setGeneratorPreview(combined);
+        const display = err.displayMessage ?? alertMessage;
+        setGeneratorPreview(display);
+        alertMessage = display;
       } else {
-        setGeneratorPreview(`Error: ${message}`);
+        const display = `Error: ${alertMessage}`;
+        setGeneratorPreview(display);
       }
+
       setLlmStatus('idle');
       setLlmStatusSource(null);
-      alert(message);
+      alert(alertMessage);
     }
   };
 
