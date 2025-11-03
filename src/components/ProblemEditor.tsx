@@ -786,7 +786,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                     {selectedSubfields.map((s) => (
                       <span key={s} className="badge" style={{display:'inline-flex', alignItems:'center', gap:6}}>
                         {s}
-                        <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}} aria-label={t('defaultsRemoveItem', { item: s })}>?</button>
+                        <button onClick={()=> removeSubfield(s)} style={{padding:'0 6px'}} aria-label={t('defaultsRemoveItem', { item: s })}>x</button>
                       </span>
                     ))}
                   </div>
