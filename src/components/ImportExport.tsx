@@ -23,7 +23,7 @@ export function ImportExport() {
   const [lastXlsxGeneratedName, setLastXlsxGeneratedName] = useState('');
   const [lastImagesGeneratedName, setLastImagesGeneratedName] = useState('');
   const isXlsxFile = (file: File) => file.name.toLowerCase().endsWith('.xlsx');
-  const isJpegFile = (file: File) => /\.(jpg|jpeg)$/i.test(file.name);
+  const isProblemImageFile = (file: File) => file.type.startsWith('image/');
 
   const buildRows = () => problems.map(p => {
     const question = String(p.question ?? '');
@@ -202,14 +202,14 @@ export function ImportExport() {
     return count;
   };
 
-  // Import images from dropped files/folders; filenames must be <id>.jpg or .jpeg
+  // Import images from dropped files/folders; filenames must be <id>.<ext>
   const importImagesFromFiles = async (files: File[]): Promise<number> => {
     let count = 0;
     const setById = new Set(problems.map(p => p.id));
     for (const f of files) {
+      if (!isProblemImageFile(f)) continue;
       const name = f.name.toLowerCase();
-      if (!(name.endsWith('.jpg') || name.endsWith('.jpeg'))) continue;
-      const id = name.replace(/\.(jpg|jpeg)$/i, '');
+      const id = name.replace(/\.[^.]+$/, '');
       if (!setById.has(id)) continue; // only update existing problems
       const path = `images/${id}.jpg`;
       await saveImageBlobAtPath(path, f);
@@ -296,7 +296,7 @@ export function ImportExport() {
     e.preventDefault();
     const { files: dropped, hasDirectory } = await collectDirectoryFiles(e.dataTransfer.items);
     if (!hasDirectory) return;
-    const files = dropped.filter(isJpegFile);
+    const files = dropped.filter(isProblemImageFile);
     await handleImageFiles(files);
   };
 
@@ -308,7 +308,7 @@ export function ImportExport() {
   };
 
   const onPasteImages = async (e: ReactClipboardEvent<Element>) => {
-    const files = extractClipboardFiles(e, isJpegFile);
+    const files = extractClipboardFiles(e, isProblemImageFile);
     if (!files.length) return;
     e.preventDefault();
     await handleImageFiles(files);
