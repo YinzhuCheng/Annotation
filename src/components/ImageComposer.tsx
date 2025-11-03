@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
+import { buildDisplayName, collectFilesFromItems, extractFilesFromClipboardData, formatTimestamp, inferExtension, readClipboardFiles } from '../lib/fileHelpers';
+
+type BlockFile = { blob: File | Blob; displayName: string };
 
 type Block =
-  | { id: string; type: 'single'; files: (File | Blob)[] }
-  | { id: string; type: 'options'; files: (File | Blob)[] } // up to 5 in A..E order
-  | { id: string; type: 'custom'; files: (File | Blob)[]; count: number; labelScheme: 'letters' | 'numbers' };
+  | { id: string; type: 'single'; files: BlockFile[] }
+  | { id: string; type: 'options'; files: BlockFile[] } // up to 5 in A..E order
+  | { id: string; type: 'custom'; files: BlockFile[]; count: number; labelScheme: 'letters' | 'numbers' };
+
+const ACCEPTED_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'heif'];
 
 function readImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -41,6 +47,159 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [composedBlob, setComposedBlob] = useState<Blob | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ blockId: string; target: 'single' | 'options' | 'custom'; x: number; y: number } | null>(null);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const closeMenu = () => {
+      setContextMenu(null);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('click', closeMenu);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, []);
+
+  const handleClipboardError = (error: unknown) => {
+    if (error instanceof Error) {
+      if (error.message === 'clipboard_permission_denied') {
+        alert(t('clipboardReadDenied'));
+        return;
+      }
+      if (error.message === 'clipboard_not_supported') {
+        alert(t('clipboardReadUnsupported'));
+        return;
+      }
+      alert(error.message);
+      return;
+    }
+    alert(String(error));
+  };
+
+  const isImageFile = (file: File) => {
+    const ext = inferExtension(file, '').toLowerCase();
+    const normalizedExt = ext === 'jpeg' ? 'jpg' : ext;
+    if (ACCEPTED_IMAGE_EXT.includes(normalizedExt)) return true;
+    return file.type.startsWith('image/');
+  };
+
+  const normalizeImageFiles = (files: File[]): File[] => {
+    return files
+      .filter(isImageFile)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  const makeBlockFiles = (files: File[], base?: string): BlockFile[] => {
+    const timestamp = base ?? formatTimestamp();
+    const total = files.length;
+    return files.map((file, index) => {
+      const ext = inferExtension(file, 'png').toLowerCase();
+      const normalizedExt = ext === 'jpeg' ? 'jpg' : ext;
+      return {
+        blob: file,
+        displayName: buildDisplayName(normalizedExt, { base: timestamp, index, total })
+      };
+    });
+  };
+
+  const applyFilesToBlock = (blockId: string, files: File[]) => {
+    const normalized = normalizeImageFiles(files);
+    if (!normalized.length) return;
+    const base = formatTimestamp();
+    const built = makeBlockFiles(normalized, base);
+    setBlocks((prev) => prev.map((b) => {
+      if (b.id !== blockId) return b;
+      if (b.type === 'single') {
+        return { ...b, files: [built[0]] } as Block;
+      }
+      if (b.type === 'options') {
+        const next = [...b.files];
+        let pointer = 0;
+        for (let i = 0; i < 5 && pointer < built.length; i++) {
+          if (!next[i]) {
+            next[i] = built[pointer++];
+          }
+        }
+        for (let i = 0; i < 5 && pointer < built.length; i++) {
+          next[i] = built[pointer++];
+        }
+        return { ...b, files: next.slice(0, 5) } as Block;
+      }
+      const limit = (b as any).count as number;
+      const next = [...b.files];
+      let pointer = 0;
+      for (let i = 0; i < limit && pointer < built.length; i++) {
+        if (!next[i]) {
+          next[i] = built[pointer++];
+        }
+      }
+      for (let i = 0; i < limit && pointer < built.length; i++) {
+        next[i] = built[pointer++];
+      }
+      return { ...(b as any), files: next.slice(0, limit) } as Block;
+    }));
+  };
+
+  const handleDropOnBlock = async (e: ReactDragEvent<HTMLDivElement>, blockId: string) => {
+    e.preventDefault();
+    setContextMenu(null);
+    const items = e.dataTransfer?.items ?? null;
+    let files: File[] = [];
+    if (items && items.length) {
+      files = await collectFilesFromItems(items, (file) => isImageFile(file));
+    }
+    if (!files.length) {
+      files = Array.from(e.dataTransfer.files || []).filter(isImageFile);
+    }
+    if (!files.length) return;
+    applyFilesToBlock(blockId, files);
+  };
+
+  const handlePasteOnBlock = async (e: ReactClipboardEvent<Element>, blockId: string) => {
+    const files = extractFilesFromClipboardData(e.clipboardData, (file) => isImageFile(file));
+    if (!files.length) return;
+    e.preventDefault();
+    applyFilesToBlock(blockId, files);
+  };
+
+  const handleContextPaste = async (blockId: string) => {
+    try {
+      const files = await readClipboardFiles((mime) => mime.startsWith('image/'));
+      const normalized = normalizeImageFiles(files);
+      if (!normalized.length) {
+        alert(t('noFilesFromClipboard'));
+      } else {
+        applyFilesToBlock(blockId, normalized);
+      }
+    } catch (error) {
+      handleClipboardError(error);
+    } finally {
+      setContextMenu(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeBlockId) return;
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = extractFilesFromClipboardData(data, isImageFile);
+      if (!files.length) return;
+      const normalized = normalizeImageFiles(files);
+      if (!normalized.length) return;
+      event.preventDefault();
+      applyFilesToBlock(activeBlockId, normalized);
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  }, [activeBlockId, applyFilesToBlock, isImageFile, normalizeImageFiles]);
 
   useEffect(() => {
     return () => {
@@ -63,7 +222,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     }
   };
 
-  const setFile = (blockId: string, idx: number, file: File | Blob) => {
+  const setFile = (blockId: string, idx: number, file: BlockFile) => {
     setBlocks(prev => prev.map(b => {
       if (b.id !== blockId) return b;
       const nextFiles = [...b.files];
@@ -76,101 +235,16 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     setBlocks(prev => prev.filter(b => b.id !== blockId));
   };
 
-  const onDropToOptions = (e: React.DragEvent, blockId: string) => {
-    e.preventDefault();
-    collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        const next = [...b.files];
-        for (const f of files) {
-          if (next.length >= 5) break;
-          next.push(f);
-        }
-        return { ...b, files: next } as Block;
-      }));
-    });
+  const onDropToOptions = (e: ReactDragEvent<HTMLDivElement>, blockId: string) => {
+    handleDropOnBlock(e, blockId);
   };
 
-  const onDropToSingle = (e: React.DragEvent, blockId: string) => {
-    e.preventDefault();
-    collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        const next = [...b.files];
-        next[0] = files[0];
-        return { ...b, files: next } as Block;
-      }));
-    });
+  const onDropToSingle = (e: ReactDragEvent<HTMLDivElement>, blockId: string) => {
+    handleDropOnBlock(e, blockId);
   };
 
-  const onDropToCustom = (e: React.DragEvent, blockId: string) => {
-    e.preventDefault();
-    collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
-      if (!files.length) return;
-      files.sort((a, b) => a.name.localeCompare(b.name));
-      setBlocks(prev => prev.map(b => {
-        if (b.id !== blockId) return b;
-        if ((b as any).type !== 'custom') return b;
-        const limit = (b as any).count as number;
-        const next = [...b.files];
-        for (const f of files) {
-          if (next.length >= limit) break;
-          next.push(f);
-        }
-        return { ...(b as any), files: next } as Block;
-      }));
-    });
-  };
-
-  // Utilities to collect dropped files including directories
-  const collectDroppedFiles = async (items: DataTransferItemList): Promise<File[]> => {
-    const filePromises: Promise<File[]>[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const entry = (item as any).webkitGetAsEntry?.();
-      if (entry) {
-        filePromises.push(traverseEntry(entry));
-      } else {
-        const file = item.getAsFile();
-        if (file) filePromises.push(Promise.resolve([file]));
-      }
-    }
-    const nested = await Promise.all(filePromises);
-    return nested.flat();
-  };
-
-  const traverseEntry = async (entry: any): Promise<File[]> => {
-    if (!entry) return [];
-    if (entry.isFile) {
-      return new Promise<File[]>((resolve) => {
-        entry.file((file: File) => resolve([file]));
-      });
-    }
-    if (entry.isDirectory) {
-      const reader = entry.createReader();
-      return new Promise<File[]>((resolve) => {
-        const all: File[] = [];
-        const readBatch = () => {
-          reader.readEntries(async (entries: any[]) => {
-            if (!entries.length) return resolve(all);
-            for (const e of entries) {
-              const files = await traverseEntry(e);
-              all.push(...files);
-            }
-            readBatch();
-          });
-        };
-        readBatch();
-      });
-    }
-    return [];
+  const onDropToCustom = (e: ReactDragEvent<HTMLDivElement>, blockId: string) => {
+    handleDropOnBlock(e, blockId);
   };
 
   const compose = async () => {
@@ -244,16 +318,17 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
       // First pass: measure heights
       for (const b of blocks) {
         if (b.type === 'single') {
-          const file = b.files[0];
-          if (!file) continue;
-          const url = URL.createObjectURL(file);
+          const fileEntry = b.files[0];
+          const blob = fileEntry?.blob;
+          if (!blob) continue;
+          const url = URL.createObjectURL(blob);
           const img = await readImage(url);
           const scale = (targetWidth - padding * 2) / img.width;
           // include row label height
           totalHeight += img.height * scale + rowLabelLineHeight + gap;
           URL.revokeObjectURL(url);
         } else if (b.type === 'options' || b.type === 'custom') {
-          const present = b.files.filter(Boolean);
+          const present = b.files.filter((entry) => !!entry?.blob);
           if (!present.length) continue;
           // Determine grouped layout
           const baseGroups = computeOptionGroups(present.length);
@@ -264,7 +339,12 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
             let rowHeight = 0;
             if (g <= 1) {
               // single option full width
-              const u = URL.createObjectURL(present[optIdx] as Blob);
+              const source = present[optIdx]?.blob;
+              if (!source) {
+                optIdx += 1;
+                continue;
+              }
+              const u = URL.createObjectURL(source);
               const img = await readImage(u);
               const scale = drawWidthFull / img.width;
               rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
@@ -274,7 +354,9 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               // multiple options in one row
               const colWidth = (drawWidthFull - optionGap * (g - 1)) / g;
               for (let i = 0; i < g; i++) {
-                const u = URL.createObjectURL(present[optIdx + i] as Blob);
+                const source = present[optIdx + i]?.blob;
+                if (!source) continue;
+                const u = URL.createObjectURL(source);
                 const img = await readImage(u);
                 const scale = colWidth / img.width;
                 rowHeight = Math.max(rowHeight, img.height * scale + rowLabelLineHeight + colLabelLineHeight);
@@ -308,9 +390,10 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
       for (let bi=0;bi<blocks.length;bi++){
         const b = blocks[bi];
         if (b.type === 'single') {
-          const file = b.files[0];
-          if (!file) continue;
-          const url = URL.createObjectURL(file);
+          const fileEntry = b.files[0];
+          const blob = fileEntry?.blob;
+          if (!blob) continue;
+          const url = URL.createObjectURL(blob);
           const img = await readImage(url);
           const drawWidth = targetWidth - padding * 2;
           const scale = drawWidth / img.width;
@@ -326,7 +409,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
           rowIndex += 1;
           URL.revokeObjectURL(url);
         } else if (b.type === 'options' || b.type === 'custom') {
-          const present = b.files.filter(Boolean);
+          const present = b.files.filter((entry) => !!entry?.blob);
           if (!present.length) continue;
           const baseGroups = computeOptionGroups(present.length);
           const groups = enforceMinArea(baseGroups);
@@ -346,8 +429,12 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
             }
 
             if (g <= 1) {
-              const file = present[optIdx] as Blob;
-              const url = URL.createObjectURL(file);
+              const source = present[optIdx]?.blob;
+              if (!source) {
+                optIdx += 1;
+                continue;
+              }
+              const url = URL.createObjectURL(source);
               const img = await readImage(url);
               const scale = drawWidth / img.width;
               const h = img.height * scale;
@@ -364,8 +451,9 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
             } else {
               const colWidth = (drawWidth - optionGap * (g - 1)) / g;
               for (let i = 0; i < g; i++) {
-                const file = present[optIdx + i] as Blob;
-                const url = URL.createObjectURL(file);
+                const source = present[optIdx + i]?.blob;
+                if (!source) continue;
+                const url = URL.createObjectURL(source);
                 const img = await readImage(url);
                 const scale = colWidth / img.width;
                 const h = img.height * scale;
@@ -428,39 +516,99 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               <button onClick={() => removeBlock(b.id)}>?</button>
             </div>
             {b.type === 'single' ? (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToSingle(e, b.id)}>
-                <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center'}}>
-                  {/* Hide native file input to avoid OS-language labels */}
-                  <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) setFile(b.id, 0, f);
-                  }} />
+              <div
+                className="dropzone"
+                tabIndex={0}
+                role="button"
+                onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                onDrop={(e)=> onDropToSingle(e, b.id)}
+                onPaste={(e)=> handlePasteOnBlock(e, b.id)}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'single', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+              >
+                <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center', flexWrap:'wrap'}}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{display:'none'}}
+                    onChange={async (e)=>{
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        applyFilesToBlock(b.id, [f]);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
                   <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                  {b.files[0] && (<span className="small">{t('selectedFile')} {(b.files[0] as File).name || t('imageAttached')}</span>)}
+                  {b.files[0] && (<span className="small">{t('generatedNameLabel')}: {b.files[0].displayName}</span>)}
                   <span className="small">{t('dragDropOrChooseImage')}</span>
+                  <span className="small">{t('rightClickForPaste')}</span>
                 </div>
               </div>
             ) : b.type === 'options' ? (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToOptions(e, b.id)}>
+              <div
+                className="dropzone"
+                tabIndex={0}
+                role="button"
+                onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                onDrop={(e)=> onDropToOptions(e, b.id)}
+                onPaste={(e)=> handlePasteOnBlock(e, b.id)}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'options', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+              >
                 <div className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
                   {[0,1,2,3,4].map(i => (
                     <div key={i}>
                       <div className="small">({String.fromCharCode(65 + i)})</div>
-                      <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                        const f = e.target.files?.[0];
-                        if (f) setFile(b.id, i, f);
-                      }} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{display:'none'}}
+                        onChange={(e)=>{
+                          const f = e.target.files?.[0];
+                          if (f) {
+                            const [blockFile] = makeBlockFiles([f]);
+                            setFile(b.id, i, blockFile);
+                          }
+                          e.target.value = '';
+                        }}
+                      />
                       <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                      {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
+                      {b.files[i] && (<div className="small" style={{marginTop:4}}>{b.files[i].displayName}</div>)}
                     </div>
                   ))}
                 </div>
-                <div className="row" style={{justifyContent:'center', marginTop:8}}>
+                <div className="row" style={{justifyContent:'center', marginTop:8, gap:8, flexWrap:'wrap'}}>
                   <span className="small">{t('dragDropMultiple')}</span>
+                  <span className="small">{t('rightClickForPaste')}</span>
                 </div>
               </div>
             ) : (
-              <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={(e)=> onDropToCustom(e, b.id)}>
+              <div
+                className="dropzone"
+                tabIndex={0}
+                role="button"
+                onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                onDrop={(e)=> onDropToCustom(e, b.id)}
+                onPaste={(e)=> handlePasteOnBlock(e, b.id)}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'custom', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+              >
                 {b.type === 'custom' && (
                   <>
                     <div className="row" style={{gap:12, justifyContent:'center', alignItems:'center', marginBottom:8}}>
@@ -477,17 +625,27 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                       {Array.from({ length: (b as any).count }).map((_, i) => (
                         <div key={i}>
                           <div className="small">{(b as any).labelScheme === 'numbers' ? `(${i+1})` : String.fromCharCode(97 + i)}</div>
-                          <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
-                            const f = e.target.files?.[0];
-                            if (f) setFile(b.id, i, f);
-                          }} />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{display:'none'}}
+                            onChange={(e)=>{
+                              const f = e.target.files?.[0];
+                              if (f) {
+                                const [blockFile] = makeBlockFiles([f]);
+                                setFile(b.id, i, blockFile);
+                              }
+                              e.target.value = '';
+                            }}
+                          />
                           <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
-                          {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
+                          {b.files[i] && (<div className="small" style={{marginTop:4}}>{b.files[i].displayName}</div>)}
                         </div>
                       ))}
                     </div>
                     <div className="row" style={{justifyContent:'center', marginTop:8}}>
                       <span className="small">{t('dragDropMultipleCustom')}</span>
+                      <span className="small">{t('rightClickForPaste')}</span>
                     </div>
                   </>
                 )}
@@ -496,6 +654,35 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
           </div>
         ))}
       </div>
+
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            top: contextMenu.y,
+            left: contextMenu.x,
+            zIndex: 9999,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            boxShadow: '0 10px 24px rgba(15, 23, 42, 0.18)',
+            padding: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
+          }}
+          onClick={(event)=> event.stopPropagation()}
+        >
+          <button
+            onClick={(event) => {
+              event.stopPropagation();
+              handleContextPaste(contextMenu.blockId);
+            }}
+          >
+            {t('pasteFromClipboard')}
+          </button>
+        </div>
+      )}
 
       {previewUrl && (
         <div style={{marginTop:12}}>

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
+import { buildDisplayName, collectFilesFromItems, extractFilesFromClipboardData, formatTimestamp, inferExtension, readClipboardFiles, resolveImageFileName } from '../lib/fileHelpers';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -44,9 +46,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrText, setOcrText] = useState('');
   const [ocrImage, setOcrImage] = useState<Blob | null>(null);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>('');
+  const [ocrDisplayName, setOcrDisplayName] = useState('');
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
+  const ocrFileInputRef = useRef<HTMLInputElement>(null);
+  const [ocrContextMenu, setOcrContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [ocrPasteActive, setOcrPasteActive] = useState(false);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
@@ -78,6 +82,23 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     translator: t('agentTranslator')
   }), [t]);
   const CUSTOM_OPTION = '__custom__';
+
+  useEffect(() => {
+    const closeMenu = () => {
+      setOcrContextMenu(null);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('click', closeMenu);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, []);
 
   const ensureMathJaxReady = async () => {
     const mj = (window as any).MathJax;
@@ -360,27 +381,70 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => clearTimeout(timer);
   }, [savedAt]);
 
-  const onAddOcrImage = async (file: File) => {
+  const onAddOcrImage = async (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
+    setOcrContextMenu(null);
     setOcrImage(file);
+    const ext = inferExtension(file, 'png').toLowerCase();
+    const normalizedExt = ext === 'jpeg' ? 'jpg' : ext;
+    const displayName = buildDisplayName(normalizedExt, { base: formatTimestamp() });
+    setOcrDisplayName(displayName);
     const url = URL.createObjectURL(file);
     if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
     setOcrPreviewUrl(url);
   };
 
-  const onDrop = async (e: React.DragEvent) => {
+  useEffect(() => {
+    if (!ocrPasteActive) return;
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = extractFilesFromClipboardData(data, (file) => file.type.startsWith('image/'));
+      if (!files.length) return;
+      event.preventDefault();
+      void onAddOcrImage(files[0]).catch(() => {});
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  }, [ocrPasteActive, onAddOcrImage]);
+
+  const handleOcrDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) await onAddOcrImage(file);
+    setOcrContextMenu(null);
+    const items = e.dataTransfer?.items ?? null;
+    let files: File[] = [];
+    if (items && items.length) {
+      files = await collectFilesFromItems(items, (file) => file.type.startsWith('image/'));
+    }
+    if (!files.length) {
+      files = Array.from(e.dataTransfer.files || []).filter((file) => file.type.startsWith('image/'));
+    }
+    const target = files[0];
+    if (target) await onAddOcrImage(target);
   };
 
-  const onPaste = async (e: React.ClipboardEvent) => {
-    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
-    if (item) {
-      const file = item.getAsFile();
-      if (file) await onAddOcrImage(file);
+  const handleOcrPaste = async (e: ReactClipboardEvent<Element>) => {
+    const files = extractFilesFromClipboardData(e.clipboardData, (file) => file.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    await onAddOcrImage(files[0]);
+  };
+
+  const handleOcrClipboardError = (error: unknown) => {
+    if (error instanceof Error) {
+      if (error.message === 'clipboard_permission_denied') {
+        alert(t('clipboardReadDenied'));
+        return;
+      }
+      if (error.message === 'clipboard_not_supported') {
+        alert(t('clipboardReadUnsupported'));
+        return;
+      }
+      alert(error.message);
+      return;
     }
+    alert(String(error));
   };
 
   const runOCR = async () => {
@@ -608,7 +672,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
   const assistToolsHint = t('llmAssistGenerateHint');
-  const imageCellValue = current.image?.trim() ? `${current.id}.jpg` : '-';
+  const imageCellValue = current.image?.trim()
+    ? resolveImageFileName(current.image, `${current.id}.jpg`)
+    : '-';
   const previewContent = useMemo(() => {
     const lines: string[] = [];
     lines.push(`${t('previewFieldId')}: ${current.id}`);
@@ -646,7 +712,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   useEffect(() => {
     const currentPath = current.image?.trim();
     if (!currentPath || !currentPath.startsWith('images/')) return;
-    const desiredPath = `images/${current.id}.jpg`;
+    const ext = currentPath.includes('.') ? currentPath.substring(currentPath.lastIndexOf('.') + 1).toLowerCase() : 'jpg';
+    const normalizedExt = ext === 'jpeg' ? 'jpg' : ext;
+    const desiredPath = `images/${current.id}.${normalizedExt}`;
     if (currentPath === desiredPath) return;
     let cancelled = false;
     (async () => {
@@ -835,7 +903,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
             <div>
               <div className="label">{t('problemText')}<span style={{ color: '#f97316', marginLeft: 4 }}>*</span></div>
-              <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={onPaste} />
+              <textarea value={current.question} onChange={(e)=> update({ question: e.target.value })} onPaste={handleOcrPaste} />
               <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
                 <div className="row" style={{gap:6, alignItems:'center'}}>
                   <button onClick={() => fixLatex('question')}>{t('latexFix')}</button>
@@ -1163,22 +1231,82 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div>
               <div className="label" style={{marginBottom:4}}>{t('assistToolOcr')}</div>
               <div className="small" style={{color:'var(--text-muted)'}}>{t('uploadImage')}</div>
-              <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
-                <div className="row" style={{justifyContent:'center', gap:8}}>
-                  <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) onAddOcrImage(f);
-                  }} />
-                  <input type="file" style={{display:'none'}} ref={folderInputRef} multiple onChange={(e)=>{
-                    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-                    if (files[0]) onAddOcrImage(files[0]);
-                  }} />
-                  {folderInputRef.current && (()=>{ folderInputRef.current.setAttribute('webkitdirectory',''); folderInputRef.current.setAttribute('directory',''); })()}
-                  <button onClick={()=> fileInputRef.current?.click()}>{t('browse')}</button>
-                  <button onClick={()=> folderInputRef.current?.click()}>{t('folder')}</button>
+              <div
+                className="dropzone"
+                tabIndex={0}
+                role="button"
+                onDrop={handleOcrDrop}
+                onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                onPaste={handleOcrPaste}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setOcrPasteActive(true); setOcrContextMenu({ x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setOcrPasteActive(true)}
+                onMouseLeave={() => setOcrPasteActive(false)}
+                onFocus={() => setOcrPasteActive(true)}
+                onFocusCapture={() => setOcrPasteActive(true)}
+                onBlur={() => setOcrPasteActive(false)}
+                onBlurCapture={() => setOcrPasteActive(false)}
+              >
+                <div className="row" style={{justifyContent:'center', gap:8, flexWrap:'wrap'}}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{display:'none'}}
+                    ref={ocrFileInputRef}
+                    onChange={async (e)=>{
+                      const file = e.target.files?.[0];
+                      if (file) await onAddOcrImage(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button onClick={()=> ocrFileInputRef.current?.click()}>{t('browse')}</button>
+                </div>
+                <div className="row" style={{justifyContent:'center', gap:8, flexWrap:'wrap', marginTop:8}}>
                   <span className="small">{t('dragDropOrPaste')}</span>
+                  <span className="small">{t('rightClickForPaste')}</span>
+                  {ocrDisplayName && (
+                    <span className="small">{t('generatedNameLabel')}: {ocrDisplayName}</span>
+                  )}
                 </div>
               </div>
+              {ocrContextMenu && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    top: ocrContextMenu.y,
+                    left: ocrContextMenu.x,
+                    zIndex: 9999,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    boxShadow: '0 10px 24px rgba(15, 23, 42, 0.18)',
+                    padding: 8,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6
+                  }}
+                  onClick={(event)=> event.stopPropagation()}
+                >
+                  <button
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      try {
+                        const files = await readClipboardFiles((mime) => mime.startsWith('image/'));
+                        if (!files.length) {
+                          alert(t('noFilesFromClipboard'));
+                        } else {
+                          await onAddOcrImage(files[0]);
+                        }
+                      } catch (error) {
+                        handleOcrClipboardError(error);
+                      } finally {
+                        setOcrContextMenu(null);
+                      }
+                    }}
+                  >
+                    {t('pasteFromClipboard')}
+                  </button>
+                </div>
+              )}
               {ocrPreviewUrl && (
                 <div style={{marginTop:8}}>
                   <div className="row" style={{justifyContent:'flex-end', marginBottom:6}}>
