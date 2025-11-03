@@ -14,6 +14,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const defaults = useAppStore((s)=> s.defaults);
   const agents = useAppStore((s)=> s.llmAgents);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const current = useMemo(() => store.problems.find(p => p.id === store.currentId)!, [store.problems, store.currentId]);
   const currentIndex = useMemo(() => store.problems.findIndex(p => p.id === store.currentId), [store.problems, store.currentId]);
   const hasPrev = currentIndex > 0;
@@ -51,6 +52,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const latexPreviewRef = useRef<HTMLDivElement>(null);
   const questionPreviewRef = useRef<HTMLDivElement>(null);
   const answerPreviewRef = useRef<HTMLDivElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'latex_preview' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
@@ -68,6 +70,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
   const [questionMathJaxError, setQuestionMathJaxError] = useState('');
   const [answerMathJaxError, setAnswerMathJaxError] = useState('');
+  const [previewMathJaxError, setPreviewMathJaxError] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -605,6 +608,73 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
   const assistToolsHint = t('llmAssistGenerateHint');
+  const previewContent = useMemo(() => {
+    const lines: string[] = [];
+    lines.push(`${t('previewIdLabel')}: ${current.id}`);
+    lines.push(`${t('targetType')}: ${current.questionType || '-'}`);
+    lines.push('');
+    lines.push(`${t('problemText')}:`);
+    lines.push((current.question?.trim() || '-'));
+    if (current.questionType === 'Multiple Choice') {
+      lines.push('');
+      lines.push(`${t('options')}:`);
+      const optionCount = getOptionCount();
+      const optionsList = Array.from({ length: optionCount }, (_, idx) => current.options?.[idx] ?? '');
+      optionsList.forEach((opt, idx) => {
+        const label = getOptionLabel(idx);
+        const body = opt?.trim() ?? '';
+        lines.push(body ? `${label}. ${body}` : `${label}.`);
+      });
+    }
+    lines.push('');
+    lines.push(`${t('answer')}:`);
+    lines.push((current.answer?.trim() || '-'));
+    lines.push('');
+    const subfieldDisplay = selectedSubfields.length > 0
+      ? selectedSubfields.join(', ')
+      : (current.subfield?.trim() || '-');
+    lines.push(`${t('subfield')}: ${subfieldDisplay}`);
+    lines.push(`${t('source')}: ${current.source?.trim() || '-'}`);
+    lines.push(`${t('academic')}: ${current.academicLevel?.trim() || '-'}`);
+    lines.push(`${difficultyLabelDisplay}: ${current.difficulty?.trim() || '-'}`);
+    return lines.join('\n');
+  }, [t, current.id, current.question, current.questionType, current.options, current.answer, current.subfield, current.source, current.academicLevel, current.difficulty, selectedSubfields, difficultyLabelDisplay, defaults.optionsCount]);
+
+  useEffect(() => {
+    if (!showPreview) return;
+    const container = previewContainerRef.current;
+    if (!container) return;
+    let cancelled = false;
+    container.innerHTML = '';
+    setPreviewMathJaxError('');
+    if (!previewContent.trim()) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    container.textContent = previewContent;
+    (async () => {
+      try {
+        const mj = await ensureMathJaxReady();
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        if (errors.length > 0) {
+          setPreviewMathJaxError(errors.join('; '));
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setPreviewMathJaxError(message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showPreview, previewContent]);
 
   const getMissingRequiredFields = (): string[] => {
     const missing: string[] = [];
@@ -663,12 +733,43 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setShowCustomSubfield(false);
   };
 
+  if (showPreview) {
+    return (
+      <div>
+        <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+          <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+            <button onClick={() => { setPreviewMathJaxError(''); setShowPreview(false); }}>{t('back')}</button>
+            <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
+            <button onClick={goNext}>{t('next')}</button>
+          </div>
+          <span className="small">{t('previewIdLabel')}: {current.id}</span>
+        </div>
+
+        <hr className="div" style={{margin:'12px 0'}} />
+
+        <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+          <div className="label" style={{margin:0, fontSize:'1.15rem', fontWeight:600}}>{t('previewTitle')}</div>
+          <div
+            ref={previewContainerRef}
+            style={{padding:16, border:'1px solid var(--border)', borderRadius:8, background:'var(--surface-subtle)', minHeight:200, whiteSpace:'pre-wrap'}}
+          />
+          {previewMathJaxError ? (
+            <span className="small" style={{color:'#f87171'}}>{t('mathJaxPreviewError', { error: previewMathJaxError })}</span>
+          ) : (!previewContent.trim() ? (
+            <span className="small" style={{color:'var(--text-muted)'}}>{t('previewEmpty')}</span>
+          ) : null)}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
         <div className="row" style={{gap:8, flexWrap:'wrap'}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
           <button onClick={handleSaveCurrent}>{t('saveProblem')}</button>
+          <button onClick={() => { setPreviewMathJaxError(''); setShowPreview(true); }}>{t('previewProblem')}</button>
         </div>
         <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
