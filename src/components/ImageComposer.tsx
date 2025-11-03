@@ -48,12 +48,15 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const [composedBlob, setComposedBlob] = useState<Blob | null>(null);
   const [isComposing, setIsComposing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ blockId: string; target: 'single' | 'options' | 'custom'; x: number; y: number } | null>(null);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
   useEffect(() => {
-    const closeMenu = () => setContextMenu(null);
+    const closeMenu = () => {
+      setContextMenu(null);
+    };
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setContextMenu(null);
+        closeMenu();
       }
     };
     document.addEventListener('click', closeMenu);
@@ -181,6 +184,22 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
       setContextMenu(null);
     }
   };
+
+  useEffect(() => {
+    if (!activeBlockId) return;
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = extractFilesFromClipboardData(data, isImageFile);
+      if (!files.length) return;
+      const normalized = normalizeImageFiles(files);
+      if (!normalized.length) return;
+      event.preventDefault();
+      applyFilesToBlock(activeBlockId, normalized);
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  }, [activeBlockId, applyFilesToBlock, isImageFile, normalizeImageFiles]);
 
   useEffect(() => {
     return () => {
@@ -504,7 +523,13 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                 onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
                 onDrop={(e)=> onDropToSingle(e, b.id)}
                 onPaste={(e)=> handlePasteOnBlock(e, b.id)}
-                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setContextMenu({ blockId: b.id, target: 'single', x: e.clientX, y: e.clientY }); }}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'single', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
               >
                 <div className="row" style={{gap:8, alignItems:'center', justifyContent:'center', flexWrap:'wrap'}}>
                   <input
@@ -533,7 +558,13 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                 onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
                 onDrop={(e)=> onDropToOptions(e, b.id)}
                 onPaste={(e)=> handlePasteOnBlock(e, b.id)}
-                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setContextMenu({ blockId: b.id, target: 'options', x: e.clientX, y: e.clientY }); }}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'options', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
               >
                 <div className="grid" style={{gridTemplateColumns:'repeat(5, 1fr)', gap:8}}>
                   {[0,1,2,3,4].map(i => (
@@ -570,7 +601,13 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                 onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
                 onDrop={(e)=> onDropToCustom(e, b.id)}
                 onPaste={(e)=> handlePasteOnBlock(e, b.id)}
-                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setContextMenu({ blockId: b.id, target: 'custom', x: e.clientX, y: e.clientY }); }}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActiveBlockId(b.id); setContextMenu({ blockId: b.id, target: 'custom', x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setActiveBlockId(b.id)}
+                onMouseLeave={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocus={() => setActiveBlockId(b.id)}
+                onBlur={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
+                onFocusCapture={() => setActiveBlockId(b.id)}
+                onBlurCapture={() => setActiveBlockId((prev) => (prev === b.id ? null : prev))}
               >
                 {b.type === 'custom' && (
                   <>

@@ -34,6 +34,7 @@ export function ImportExport() {
   const [imagesDisplayName, setImagesDisplayName] = useState('');
   const [xlsxContextMenu, setXlsxContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imagesContextMenu, setImagesContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [activePasteTarget, setActivePasteTarget] = useState<'xlsx' | 'images' | null>(null);
 
   useEffect(() => {
     const closeMenus = () => {
@@ -377,6 +378,27 @@ export function ImportExport() {
     await handleImagesFiles(files);
   };
 
+  useEffect(() => {
+    if (!activePasteTarget) return;
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      if (activePasteTarget === 'xlsx') {
+        const files = extractFilesFromClipboardData(data, isXlsxFile);
+        if (!files.length) return;
+        event.preventDefault();
+        void handleXlsxFiles(files).catch(() => {});
+      } else {
+        const files = extractFilesFromClipboardData(data, isImageFile);
+        if (!files.length) return;
+        event.preventDefault();
+        void handleImagesFiles(files).catch(() => {});
+      }
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  }, [activePasteTarget, handleImagesFiles, handleXlsxFiles, isImageFile, isXlsxFile]);
+
   return (
     <div className="grid" style={{gap:12, gridTemplateColumns:'1fr'}}>
       <div className="row" style={{gap:8, flexWrap:'wrap'}}>
@@ -392,7 +414,13 @@ export function ImportExport() {
         onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={onDropXlsx}
         onPaste={onPasteXlsx}
-        onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setXlsxContextMenu({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActivePasteTarget('xlsx'); setXlsxContextMenu({ x: e.clientX, y: e.clientY }); }}
+        onMouseEnter={() => setActivePasteTarget('xlsx')}
+        onMouseLeave={() => setActivePasteTarget((prev) => (prev === 'xlsx' ? null : prev))}
+        onFocus={() => setActivePasteTarget('xlsx')}
+        onFocusCapture={() => setActivePasteTarget('xlsx')}
+        onBlur={() => setActivePasteTarget((prev) => (prev === 'xlsx' ? null : prev))}
+        onBlurCapture={() => setActivePasteTarget((prev) => (prev === 'xlsx' ? null : prev))}
         style={{padding:'8px 12px'}}
       >
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center', flexWrap:'wrap'}}>
@@ -429,7 +457,13 @@ export function ImportExport() {
         onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={onDropImages}
         onPaste={onPasteImages}
-        onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setImagesContextMenu({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setActivePasteTarget('images'); setImagesContextMenu({ x: e.clientX, y: e.clientY }); }}
+        onMouseEnter={() => setActivePasteTarget('images')}
+        onMouseLeave={() => setActivePasteTarget((prev) => (prev === 'images' ? null : prev))}
+        onFocus={() => setActivePasteTarget('images')}
+        onFocusCapture={() => setActivePasteTarget('images')}
+        onBlur={() => setActivePasteTarget((prev) => (prev === 'images' ? null : prev))}
+        onBlurCapture={() => setActivePasteTarget((prev) => (prev === 'images' ? null : prev))}
         style={{padding:'8px 12px'}}
       >
         <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center', flexWrap:'wrap'}}>

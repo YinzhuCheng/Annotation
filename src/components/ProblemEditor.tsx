@@ -50,6 +50,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const [ocrContextMenu, setOcrContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [ocrPasteActive, setOcrPasteActive] = useState(false);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
@@ -83,10 +84,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const CUSTOM_OPTION = '__custom__';
 
   useEffect(() => {
-    const closeMenu = () => setOcrContextMenu(null);
+    const closeMenu = () => {
+      setOcrContextMenu(null);
+    };
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setOcrContextMenu(null);
+        closeMenu();
       }
     };
     document.addEventListener('click', closeMenu);
@@ -391,6 +394,20 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
     setOcrPreviewUrl(url);
   };
+
+  useEffect(() => {
+    if (!ocrPasteActive) return;
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      const data = event.clipboardData;
+      if (!data) return;
+      const files = extractFilesFromClipboardData(data, (file) => file.type.startsWith('image/'));
+      if (!files.length) return;
+      event.preventDefault();
+      void onAddOcrImage(files[0]).catch(() => {});
+    };
+    window.addEventListener('paste', handlePasteEvent);
+    return () => window.removeEventListener('paste', handlePasteEvent);
+  }, [ocrPasteActive, onAddOcrImage]);
 
   const handleOcrDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1221,7 +1238,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 onDrop={handleOcrDrop}
                 onDragOver={(e)=> { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
                 onPaste={handleOcrPaste}
-                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setOcrContextMenu({ x: e.clientX, y: e.clientY }); }}
+                onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); setOcrPasteActive(true); setOcrContextMenu({ x: e.clientX, y: e.clientY }); }}
+                onMouseEnter={() => setOcrPasteActive(true)}
+                onMouseLeave={() => setOcrPasteActive(false)}
+                onFocus={() => setOcrPasteActive(true)}
+                onFocusCapture={() => setOcrPasteActive(true)}
+                onBlur={() => setOcrPasteActive(false)}
+                onBlurCapture={() => setOcrPasteActive(false)}
               >
                 <div className="row" style={{justifyContent:'center', gap:8, flexWrap:'wrap'}}>
                   <input
