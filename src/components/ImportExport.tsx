@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
+import { formatTimestampName } from '../lib/fileNames';
+import { extractClipboardFiles, preventPrintableInput } from '../lib/clipboard';
 
 const HEADER = [
   'id','Question','Question_Type','Options','Answer','Subfield','Source','Image','Image_Dependency','Academic_Level','Difficulty'
@@ -14,8 +17,13 @@ export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesFolderInputRef = useRef<HTMLInputElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
+  const [lastXlsxGeneratedName, setLastXlsxGeneratedName] = useState('');
+  const [lastImagesGeneratedName, setLastImagesGeneratedName] = useState('');
+  const isXlsxFile = (file: File) => file.name.toLowerCase().endsWith('.xlsx');
+  const isProblemImageFile = (file: File) => file.type.startsWith('image/');
 
   const buildRows = () => problems.map(p => {
     const question = String(p.question ?? '');
@@ -194,14 +202,14 @@ export function ImportExport() {
     return count;
   };
 
-  // Import images from dropped files/folders; filenames must be <id>.jpg or .jpeg
+  // Import images from dropped files/folders; filenames must be <id>.<ext>
   const importImagesFromFiles = async (files: File[]): Promise<number> => {
     let count = 0;
     const setById = new Set(problems.map(p => p.id));
     for (const f of files) {
+      if (!isProblemImageFile(f)) continue;
       const name = f.name.toLowerCase();
-      if (!(name.endsWith('.jpg') || name.endsWith('.jpeg'))) continue;
-      const id = name.replace(/\.(jpg|jpeg)$/i, '');
+      const id = name.replace(/\.[^.]+$/, '');
       if (!setById.has(id)) continue; // only update existing problems
       const path = `images/${id}.jpg`;
       await saveImageBlobAtPath(path, f);
@@ -212,24 +220,46 @@ export function ImportExport() {
     return count;
   };
 
-  // Collect dropped files, supporting folders via webkit entries
-  const collectDroppedFiles = async (items: DataTransferItemList): Promise<File[]> => {
-    const filePromises: Promise<File[]>[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const entry = (item as any).webkitGetAsEntry?.();
-      if (entry) {
-        filePromises.push(traverseEntry(entry));
-      } else {
-        const file = item.getAsFile();
-        if (file) filePromises.push(Promise.resolve([file]));
-      }
+  const handleXlsxFiles = async (files: File[]) => {
+    if (!files.length) return 0;
+    let total = 0;
+    for (const f of files) {
+      total += await importXlsx(f);
     }
-    const nested = await Promise.all(filePromises);
-    return nested.flat();
+    if (total > 0) {
+      setImportedCount(total);
+      setLastXlsxGeneratedName(formatTimestampName({ prefix: 'xlsx', extension: 'xlsx' }));
+    }
+    return total;
   };
 
-  const traverseEntry = async (entry: any): Promise<File[]> => {
+  const handleImageFiles = async (files: File[]) => {
+    if (!files.length) return 0;
+    const c = await importImagesFromFiles(files);
+    if (c > 0) {
+      setImportedImagesCount(c);
+      setLastImagesGeneratedName(formatTimestampName({ prefix: 'images' }));
+    }
+    return c;
+  };
+
+  const collectDirectoryFiles = async (items: DataTransferItemList | undefined | null): Promise<{ files: File[]; hasDirectory: boolean }> => {
+    if (!items || !items.length) return { files: [], hasDirectory: false };
+    const tasks: Promise<File[]>[] = [];
+    let hasDirectory = false;
+    for (let i = 0; i < items.length; i++) {
+      const entry = (items[i] as any).webkitGetAsEntry?.();
+      if (entry?.isDirectory) {
+        hasDirectory = true;
+        tasks.push(traverseDirectory(entry));
+      }
+    }
+    if (!hasDirectory) return { files: [], hasDirectory: false };
+    const nested = await Promise.all(tasks);
+    return { files: nested.flat(), hasDirectory: true };
+  };
+
+  const traverseDirectory = async (entry: any): Promise<File[]> => {
     if (!entry) return [];
     if (entry.isFile) {
       return new Promise<File[]>((resolve) => {
@@ -244,7 +274,7 @@ export function ImportExport() {
           reader.readEntries(async (entries: any[]) => {
             if (!entries.length) return resolve(all);
             for (const e of entries) {
-              const files = await traverseEntry(e);
+              const files = await traverseDirectory(e);
               all.push(...files);
             }
             readBatch();
@@ -258,21 +288,30 @@ export function ImportExport() {
 
   const onDropXlsx = async (e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = await collectDroppedFiles(e.dataTransfer.items);
-    const files = dropped.filter(f => f.name.toLowerCase().endsWith('.xlsx'));
-    let total = 0;
-    for (const f of files) {
-      total += await importXlsx(f);
-    }
-    if (total > 0) setImportedCount(total);
+    const files = Array.from(e.dataTransfer.files || []).filter(isXlsxFile);
+    await handleXlsxFiles(files);
   };
 
   const onDropImages = async (e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = await collectDroppedFiles(e.dataTransfer.items);
-    const files = dropped.filter(f => /\.(jpg|jpeg)$/i.test(f.name));
-    const c = await importImagesFromFiles(files);
-    if (c > 0) setImportedImagesCount(c);
+    const { files: dropped, hasDirectory } = await collectDirectoryFiles(e.dataTransfer.items);
+    if (!hasDirectory) return;
+    const files = dropped.filter(isProblemImageFile);
+    await handleImageFiles(files);
+  };
+
+  const onPasteXlsx = async (e: ReactClipboardEvent<Element>) => {
+    const files = extractClipboardFiles(e, isXlsxFile);
+    if (!files.length) return;
+    e.preventDefault();
+    await handleXlsxFiles(files);
+  };
+
+  const onPasteImages = async (e: ReactClipboardEvent<Element>) => {
+    const files = extractClipboardFiles(e, isProblemImageFile);
+    if (!files.length) return;
+    e.preventDefault();
+    await handleImageFiles(files);
   };
 
   return (
@@ -283,8 +322,18 @@ export function ImportExport() {
         <button onClick={exportDatasets}>{t('exportDatasets')}</button>
       </div>
 
-      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropXlsx} style={{padding:'8px 12px'}}>
-        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+      <div
+        className="dropzone"
+        contentEditable
+        suppressContentEditableWarning
+        tabIndex={0}
+        onDragOver={(e)=> e.preventDefault()}
+        onDrop={onDropXlsx}
+        onPaste={onPasteXlsx}
+        onKeyDown={preventPrintableInput}
+        style={{padding:'8px 12px', caretColor:'transparent'}}
+      >
+        <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
           <input
             ref={fileInputRef}
             type="file"
@@ -293,13 +342,18 @@ export function ImportExport() {
             onChange={async (e)=>{
               const f = e.target.files?.[0];
               if (f) {
-                const c = await importXlsx(f);
-                if (c > 0) setImportedCount(c);
+                await handleXlsxFiles([f]);
+                e.target.value = '';
               }
             }}
           />
           <button onClick={()=> fileInputRef.current?.click()}>{t('importXlsx')}</button>
           <span className="small">{t('importXlsxHint')}</span>
+          {lastXlsxGeneratedName && (
+            <span className="small" style={{ marginLeft: 8 }}>
+              {t('generatedFileName', { name: lastXlsxGeneratedName })}
+            </span>
+          )}
           {importedCount !== null && (
             <span className="small" style={{ marginLeft: 8 }}>
               {t('importSuccess', { count: importedCount })}
@@ -308,34 +362,48 @@ export function ImportExport() {
         </div>
       </div>
 
-      <div className="dropzone" onDragOver={(e)=> e.preventDefault()} onDrop={onDropImages} style={{padding:'8px 12px'}}>
-        <div className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
-          {(() => {
-            let dirEl: HTMLInputElement | null = null;
-            return (
-              <>
-                <input
-                  type="file"
-                  style={{display:'none'}}
-                  multiple
-                  ref={(el)=>{ if (el) { el.setAttribute('webkitdirectory',''); el.setAttribute('directory',''); dirEl = el; } }}
-                  accept="image/jpeg,image/jpg"
-                  onChange={async (e)=>{
-                    const files = Array.from(e.target.files || []).filter(f => /\.(jpg|jpeg)$/i.test(f.name));
-                    const c = await importImagesFromFiles(files);
-                    if (c > 0) setImportedImagesCount(c);
-                  }}
-                />
-                <button onClick={()=> dirEl?.click()}>{t('importImages')}</button>
-                <span className="small">{t('importImagesHint')}</span>
-                {importedImagesCount !== null && (
-                  <span className="small" style={{ marginLeft: 8 }}>
-                    {t('importImagesSuccess', { count: importedImagesCount })}
-                  </span>
-                )}
-              </>
-            );
-          })()}
+      <div
+        className="dropzone"
+        contentEditable
+        suppressContentEditableWarning
+        tabIndex={0}
+        onDragOver={(e)=> e.preventDefault()}
+        onDrop={onDropImages}
+        onPaste={onPasteImages}
+        onKeyDown={preventPrintableInput}
+        style={{padding:'8px 12px', caretColor:'transparent'}}
+      >
+        <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8, alignItems:'center'}}>
+          <input
+            type="file"
+            style={{display:'none'}}
+            ref={(el)=> {
+              if (el) {
+                el.setAttribute('webkitdirectory','');
+                el.setAttribute('directory','');
+              }
+              imagesFolderInputRef.current = el;
+            }}
+            accept="image/jpeg,image/jpg"
+            onChange={async (e)=>{
+              const files = Array.from(e.target.files || []).filter(isJpegFile);
+              if (files.length === 0) return;
+              await handleImageFiles(files);
+              e.target.value = '';
+            }}
+          />
+          <button onClick={()=> imagesFolderInputRef.current?.click()}>{t('importImages')}</button>
+          <span className="small">{t('importImagesHint')}</span>
+          {lastImagesGeneratedName && (
+            <span className="small" style={{ marginLeft: 8 }}>
+              {t('generatedFileName', { name: lastImagesGeneratedName })}
+            </span>
+          )}
+          {importedImagesCount !== null && (
+            <span className="small" style={{ marginLeft: 8 }}>
+              {t('importImagesSuccess', { count: importedImagesCount })}
+            </span>
+          )}
         </div>
       </div>
     </div>

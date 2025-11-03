@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore, ProblemRecord, AgentId } from '../state/store';
 import { latexCorrection, ocrWithLLM, translateWithLLM } from '../lib/llmAdapter';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
+import { cloneFileWithTimestamp } from '../lib/fileNames';
 import { openViewerWindow } from '../lib/viewer';
 import { generateProblemFromText, GeneratorConversationTurn, LLMGenerationError } from '../lib/generator';
+import { extractClipboardFiles, preventPrintableInput } from '../lib/clipboard';
 
 type GeneratorTurnState = GeneratorConversationTurn & { patch: Partial<ProblemRecord>; timestamp: number };
 
@@ -44,9 +47,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrText, setOcrText] = useState('');
   const [ocrImage, setOcrImage] = useState<Blob | null>(null);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>('');
+  const [ocrGeneratedName, setOcrGeneratedName] = useState('');
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
   const customSubfieldInputRef = useRef<HTMLInputElement>(null);
   const customSourceInputRef = useRef<HTMLInputElement>(null);
   const latexPreviewRef = useRef<HTMLDivElement>(null);
@@ -363,24 +366,38 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const onAddOcrImage = async (file: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
-    setOcrImage(file);
-    const url = URL.createObjectURL(file);
+    const renamed = cloneFileWithTimestamp(file, { prefix: 'ocr', fallbackExtension: 'png' });
+    setOcrImage(renamed);
+    setOcrGeneratedName(renamed.name);
+    const url = URL.createObjectURL(renamed);
     if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
     setOcrPreviewUrl(url);
   };
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) await onAddOcrImage(file);
+    let target: File | null = null;
+    const items = e.dataTransfer.items;
+    if (items && items.length) {
+      for (let i = 0; i < items.length; i++) {
+        const file = items[i].getAsFile();
+        if (file && file.type.startsWith('image/')) {
+          target = file;
+          break;
+        }
+      }
+    }
+    if (!target && e.dataTransfer.files?.length) {
+      target = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/')) || null;
+    }
+    if (target) await onAddOcrImage(target);
   };
 
-  const onPaste = async (e: React.ClipboardEvent) => {
-    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
-    if (item) {
-      const file = item.getAsFile();
-      if (file) await onAddOcrImage(file);
-    }
+  const handleOcrPaste = async (e: ReactClipboardEvent<Element>) => {
+    const files = extractClipboardFiles(e, (file) => file.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    await onAddOcrImage(files[0]);
   };
 
   const runOCR = async () => {
@@ -1163,20 +1180,36 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             <div>
               <div className="label" style={{marginBottom:4}}>{t('assistToolOcr')}</div>
               <div className="small" style={{color:'var(--text-muted)'}}>{t('uploadImage')}</div>
-              <div className="dropzone" onDrop={onDrop} onDragOver={(e)=> e.preventDefault()} onPaste={onPaste}>
-                <div className="row" style={{justifyContent:'center', gap:8}}>
-                  <input type="file" accept="image/*" style={{display:'none'}} ref={fileInputRef} onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) onAddOcrImage(f);
-                  }} />
-                  <input type="file" style={{display:'none'}} ref={folderInputRef} multiple onChange={(e)=>{
-                    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-                    if (files[0]) onAddOcrImage(files[0]);
-                  }} />
-                  {folderInputRef.current && (()=>{ folderInputRef.current.setAttribute('webkitdirectory',''); folderInputRef.current.setAttribute('directory',''); })()}
+              <div
+                className="dropzone"
+                contentEditable
+                suppressContentEditableWarning
+                tabIndex={0}
+                onDrop={onDrop}
+                onDragOver={(e)=> e.preventDefault()}
+                onPaste={handleOcrPaste}
+                onKeyDown={preventPrintableInput}
+                style={{caretColor:'transparent'}}
+              >
+                <div contentEditable={false} className="row" style={{justifyContent:'center', gap:8}}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{display:'none'}}
+                    ref={fileInputRef}
+                    onChange={async (e)=>{
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        await onAddOcrImage(f);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
                   <button onClick={()=> fileInputRef.current?.click()}>{t('browse')}</button>
-                  <button onClick={()=> folderInputRef.current?.click()}>{t('folder')}</button>
                   <span className="small">{t('dragDropOrPaste')}</span>
+                  {ocrGeneratedName && (
+                    <span className="small" style={{ marginLeft: 8 }}>{t('generatedFileName', { name: ocrGeneratedName })}</span>
+                  )}
                 </div>
               </div>
               {ocrPreviewUrl && (
