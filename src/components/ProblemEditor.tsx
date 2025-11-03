@@ -93,6 +93,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const composeLatexCorrectionInput = (snippet: string, reportLines?: string[], contextLabel?: string) => {
     const lines: string[] = [];
     lines.push('MathJax rendering is used in our application.');
+    lines.push('This may be an iterative session. Carry forward all previous improvements and integrate any feedback provided below.');
     if (contextLabel) {
       lines.push(`Context: ${contextLabel}`);
     }
@@ -603,6 +604,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     : [...difficultyOptions, current.difficulty];
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
+  const assistToolsHint = t('llmAssistGenerateHint');
 
   const getMissingRequiredFields = (): string[] => {
     const missing: string[] = [];
@@ -868,7 +870,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
             <div>
               <div className="label" style={{margin:0, fontSize:'1.15rem', fontWeight:600}}>{t('assistToolsTitle')}</div>
-              <div className="small" style={{marginTop:6, color:'var(--text-muted)'}}>{t('llmAssistGenerateHint')}</div>
+              {assistToolsHint && assistToolsHint.trim().length > 0 && (
+                <div className="small" style={{marginTop:6, color:'var(--text-muted)'}}>{assistToolsHint}</div>
+              )}
             </div>
 
             <div>
