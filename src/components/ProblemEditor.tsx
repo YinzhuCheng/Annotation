@@ -278,7 +278,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         conversation
       });
       update(result.patch);
-      setGeneratorPreview(JSON.stringify(result.patch, null, 2));
+      setGeneratorPreview(result.raw || '');
       setGeneratorHistory((prev) => [
         ...prev,
         {
@@ -297,18 +297,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       const baseMessage = err?.message ? String(err.message) : String(err);
       const rawText = typeof err?.raw === 'string' ? err.raw : '';
       const rawTrimmed = rawText.trim();
-      const displayMessage = typeof err?.displayMessage === 'string'
+      const preview = rawTrimmed ? rawText : (typeof err?.displayMessage === 'string' ? err.displayMessage : baseMessage);
+      setGeneratorPreview(preview);
+      const alertMessage = typeof err?.displayMessage === 'string'
         ? err.displayMessage
-        : (rawTrimmed ? `${baseMessage}\n\n${rawText}` : null);
-
-      if (displayMessage) {
-        setGeneratorPreview(displayMessage);
-        alert(displayMessage);
-      } else {
-        const fallback = `Error: ${baseMessage}`;
-        setGeneratorPreview(fallback);
-        alert(fallback);
-      }
+        : (rawTrimmed ? `${baseMessage}\n\n${rawText}` : `Error: ${baseMessage}`);
+      alert(alertMessage);
 
       setLlmStatus('idle');
       setLlmStatusSource(null);
