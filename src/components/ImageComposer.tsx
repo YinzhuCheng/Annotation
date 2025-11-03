@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
+import { cloneFileWithTimestamp } from '../lib/fileNames';
 
 type Block =
   | { id: string; type: 'single'; files: (File | Blob)[] }
@@ -63,11 +64,21 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
     }
   };
 
+  const normalizeFileForBlock = (file: File | Blob, blockType: Block['type']): File | Blob => {
+    if (!(file instanceof File)) return file;
+    const prefix = blockType === 'options'
+      ? 'option'
+      : blockType === 'custom'
+        ? 'custom'
+        : 'image';
+    return cloneFileWithTimestamp(file, { prefix, fallbackExtension: 'jpg' });
+  };
+
   const setFile = (blockId: string, idx: number, file: File | Blob) => {
     setBlocks(prev => prev.map(b => {
       if (b.id !== blockId) return b;
       const nextFiles = [...b.files];
-      nextFiles[idx] = file;
+      nextFiles[idx] = normalizeFileForBlock(file, b.type);
       return { ...b, files: nextFiles } as Block;
     }));
   };
@@ -79,7 +90,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const onDropToOptions = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
+      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
       if (!files.length) return;
       files.sort((a, b) => a.name.localeCompare(b.name));
       setBlocks(prev => prev.map(b => {
@@ -87,7 +98,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
         const next = [...b.files];
         for (const f of files) {
           if (next.length >= 5) break;
-          next.push(f);
+          next.push(normalizeFileForBlock(f, b.type));
         }
         return { ...b, files: next } as Block;
       }));
@@ -97,13 +108,13 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const onDropToSingle = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
+      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
       if (!files.length) return;
       files.sort((a, b) => a.name.localeCompare(b.name));
       setBlocks(prev => prev.map(b => {
         if (b.id !== blockId) return b;
         const next = [...b.files];
-        next[0] = files[0];
+        next[0] = normalizeFileForBlock(files[0], b.type);
         return { ...b, files: next } as Block;
       }));
     });
@@ -112,7 +123,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const onDropToCustom = (e: React.DragEvent, blockId: string) => {
     e.preventDefault();
     collectDroppedFiles(e.dataTransfer.items).then((all) => {
-      const files = all.filter(f => f.type.startsWith('image/'));
+      const files = (all.length ? all : Array.from(e.dataTransfer.files || [])).filter(f => f.type.startsWith('image/'));
       if (!files.length) return;
       files.sort((a, b) => a.name.localeCompare(b.name));
       setBlocks(prev => prev.map(b => {
@@ -122,7 +133,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
         const next = [...b.files];
         for (const f of files) {
           if (next.length >= limit) break;
-          next.push(f);
+          next.push(normalizeFileForBlock(f, b.type));
         }
         return { ...(b as any), files: next } as Block;
       }));
@@ -434,6 +445,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                   <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                     const f = e.target.files?.[0];
                     if (f) setFile(b.id, 0, f);
+                    e.target.value = '';
                   }} />
                   <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
                   {b.files[0] && (<span className="small">{t('selectedFile')} {(b.files[0] as File).name || t('imageAttached')}</span>)}
@@ -449,6 +461,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                       <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                         const f = e.target.files?.[0];
                         if (f) setFile(b.id, i, f);
+                        e.target.value = '';
                       }} />
                       <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
                       {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
@@ -480,6 +493,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
                           <input type="file" accept="image/*" style={{display:'none'}} onChange={(e)=>{
                             const f = e.target.files?.[0];
                             if (f) setFile(b.id, i, f);
+                            e.target.value = '';
                           }} />
                           <button onClick={(e)=>{ const el = (e.currentTarget.previousSibling as HTMLInputElement); (el as HTMLInputElement)?.click(); }}>{t('browse')}</button>
                           {b.files[i] && (<div className="small" style={{marginTop:4}}>{(b.files[i] as File).name}</div>)}
