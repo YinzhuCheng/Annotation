@@ -51,6 +51,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const latexPreviewRef = useRef<HTMLDivElement>(null);
   const questionPreviewRef = useRef<HTMLDivElement>(null);
   const answerPreviewRef = useRef<HTMLDivElement>(null);
+  const problemPreviewRef = useRef<HTMLDivElement>(null);
   const [llmStatus, setLlmStatus] = useState<'idle'|'waiting_response'|'thinking'|'responding'|'done'>('idle');
   const [llmStatusSource, setLlmStatusSource] = useState<null | 'generate' | 'latex_question' | 'latex_answer' | 'latex_preview' | 'ocr'>(null);
   const [dots, setDots] = useState(1);
@@ -68,6 +69,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
   const [questionMathJaxError, setQuestionMathJaxError] = useState('');
   const [answerMathJaxError, setAnswerMathJaxError] = useState('');
+  const [isProblemPreviewOpen, setIsProblemPreviewOpen] = useState(false);
+  const [problemPreviewError, setProblemPreviewError] = useState('');
   const agentDisplay = useMemo<Record<AgentId, string>>(() => ({
     ocr: t('agentOcr'),
     latex: t('agentLatex'),
@@ -278,6 +281,43 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     render();
     return () => { cancelled = true; };
   }, [current.answer, current.options, current.questionType, defaults.optionsCount]);
+
+  useEffect(() => {
+    if (!isProblemPreviewOpen) return;
+    const container = problemPreviewRef.current;
+    if (!container) return;
+    let cancelled = false;
+
+    const render = async () => {
+      setProblemPreviewError('');
+      container.innerHTML = '';
+      const snippet = problemPreviewSnippet.trim();
+      if (!snippet) {
+        container.textContent = t('problemPreviewEmpty');
+        return;
+      }
+      container.textContent = snippet;
+      try {
+        const mj = await ensureMathJaxReady();
+        mj.texReset?.();
+        await mj.typesetPromise([container]);
+        if (cancelled) return;
+        const errors = Array.from(container.querySelectorAll('mjx-merror'))
+          .map((node) => node.getAttribute('data-mjx-error') || node.textContent?.trim() || '')
+          .filter((text) => text.length > 0);
+        if (errors.length > 0) {
+          setProblemPreviewError(errors.join('; '));
+        }
+      } catch (error: any) {
+        if (cancelled) return;
+        const message = error?.message ? String(error.message) : String(error);
+        setProblemPreviewError(message);
+      }
+    };
+
+    render();
+    return () => { cancelled = true; };
+  }, [isProblemPreviewOpen, problemPreviewSnippet, t]);
 
   useEffect(() => {
     if (!feedbackSavedAt) return;
@@ -604,6 +644,58 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     : [...difficultyOptions, current.difficulty];
   const [showCustomSubfield, setShowCustomSubfield] = useState(false);
   const [customSubfield, setCustomSubfield] = useState('');
+  const problemPreviewSnippet = useMemo(() => {
+    const segments: string[] = [];
+    const emptyValue = t('llmEmptyValue');
+    const questionText = (current.question ?? '').trim();
+    segments.push(`${t('problemText')}:\n${questionText || emptyValue}`);
+
+    const typeLabelMap: Record<ProblemRecord['questionType'], string> = {
+      'Multiple Choice': t('type_mc'),
+      'Fill-in-the-blank': t('type_fitb'),
+      Proof: t('type_proof')
+    };
+    const typeLabel = typeLabelMap[current.questionType] ?? current.questionType;
+    const metaLines: string[] = [
+      `${t('targetType')}: ${typeLabel}`,
+      `ID: ${current.id}`
+    ];
+    const subfieldDisplay = selectedSubfields.length > 0 ? selectedSubfields.join(', ') : '';
+    metaLines.push(`${t('subfield')}: ${subfieldDisplay || emptyValue}`);
+    metaLines.push(`${t('source')}: ${(current.source ?? '').trim() || emptyValue}`);
+    metaLines.push(`${t('academic')}: ${(current.academicLevel ?? '').trim() || emptyValue}`);
+    metaLines.push(`${difficultyLabelDisplay}: ${(current.difficulty ?? '').trim() || emptyValue}`);
+    segments.push(metaLines.join('\n'));
+
+    if (current.questionType === 'Multiple Choice') {
+      const baseOptions = Array.isArray(current.options) ? current.options : [];
+      const configuredCount = defaults.optionsCount || 0;
+      const optionCount = Math.max(2, configuredCount, baseOptions.length);
+      const optionLines = Array.from({ length: optionCount }, (_, idx) => {
+        const text = (baseOptions[idx] ?? '').trim();
+        return `${getOptionLabel(idx)}) ${text || emptyValue}`;
+      });
+      segments.push([`${t('options')}:`, ...optionLines].join('\n'));
+    }
+
+    const answerText = (current.answer ?? '').trim();
+    segments.push(`${t('answer')}:\n${answerText || emptyValue}`);
+
+    return segments.join('\n\n').trim();
+  }, [
+    current.answer,
+    current.academicLevel,
+    current.difficulty,
+    current.id,
+    current.options,
+    current.question,
+    current.questionType,
+    current.source,
+    defaults.optionsCount,
+    difficultyLabelDisplay,
+    selectedSubfields,
+    t
+  ]);
   const assistToolsHint = t('llmAssistGenerateHint');
 
   const getMissingRequiredFields = (): string[] => {
@@ -634,6 +726,20 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!ensureRequiredBeforeProceed()) return;
     store.upsertProblem({});
     setSavedAt(Date.now());
+  };
+
+  const toggleProblemPreview = () => {
+    setIsProblemPreviewOpen((prev) => {
+      if (prev) {
+        setProblemPreviewError('');
+      }
+      return !prev;
+    });
+  };
+
+  const closeProblemPreview = () => {
+    setProblemPreviewError('');
+    setIsProblemPreviewOpen(false);
   };
 
   const addSubfield = (value: string) => {
@@ -669,6 +775,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         <div className="row" style={{gap:8, flexWrap:'wrap'}}>
           <button className="primary" onClick={() => store.newProblem()}>{t('newProblem')}</button>
           <button onClick={handleSaveCurrent}>{t('saveProblem')}</button>
+          <button onClick={toggleProblemPreview}>{t('problemPreview')}</button>
         </div>
         <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
           <button onClick={goPrev} disabled={!hasPrev}>{t('prev')}</button>
@@ -677,6 +784,22 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           {savedAt && <span className="badge">{t('saved')}</span>}
         </div>
       </div>
+
+      {isProblemPreviewOpen && (
+        <div className="card" style={{marginTop:12, display:'flex', flexDirection:'column', gap:12}}>
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
+            <div className="label" style={{margin:0, fontSize:'1.05rem', fontWeight:600}}>{t('problemPreviewTitle')}</div>
+            <button onClick={closeProblemPreview}>{t('dismiss')}</button>
+          </div>
+          <div
+            ref={problemPreviewRef}
+            style={{whiteSpace:'pre-wrap', border:'1px solid var(--border)', borderRadius:8, padding:12, background:'var(--btn-bg)', minHeight:80}}
+          />
+          {problemPreviewError && (
+            <div className="small" style={{color:'#f87171'}}>{t('mathJaxPreviewError', { error: problemPreviewError })}</div>
+          )}
+        </div>
+      )}
 
       <div className="small" style={{marginTop:8, color:'var(--text-muted)'}}>{t('requiredMarkNote')}</div>
 
