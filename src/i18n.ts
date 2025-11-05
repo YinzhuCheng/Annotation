@@ -268,6 +268,16 @@ const resources = {
         , batchImport_reviewEmpty: 'No rewrite results yet.'
         , batchImport_segmentationPartial: 'Segmentation finished with some errors—review blocks marked as error.'
         , batchImport_rewritePartial: 'Rewrite finished with some errors—review failed entries.'
+        , batchImport_progressSegmentation: 'Segmentation progress: {{done}} / {{total}} (processing {{processing}}, errors {{errors}})'
+        , batchImport_progressRewrite: 'Rewrite progress: {{done}} / {{total}} (processing {{processing}}, errors {{errors}})'
+        , batchImport_segmentationHeading: 'Segmentation results'
+        , batchImport_rewriteHeading: 'Converted problems'
+        , batchImport_noSegmentation: 'Run segmentation to populate candidates.'
+        , batchImport_noRewrite: 'Run rewrite to generate problems.'
+        , batchImport_candidateMeta: 'Page {{page}} • Block {{block}} • {{confidence}}%'
+        , batchImport_problemMeta: 'Candidate {{candidate}} • Status {{status}}'
+        , batchImport_ocrMissing: 'OCR agent configuration required before processing image-only pages.'
+        , batchImport_skipEmpty: 'Skipped (no text extracted)'
     }
   },
   zh: {
@@ -536,6 +546,16 @@ const resources = {
         , batchImport_reviewEmpty: '暂无改写结果，先运行流程。'
         , batchImport_segmentationPartial: '细分已完成，但部分块出现错误，请查看标记为错误的条目。'
         , batchImport_rewritePartial: '改写已完成，但部分条目失败，请检查对应结果。'
+        , batchImport_progressSegmentation: '细分进度：{{done}} / {{total}}（处理中 {{processing}}，出错 {{errors}}）'
+        , batchImport_progressRewrite: '改写进度：{{done}} / {{total}}（处理中 {{processing}}，出错 {{errors}}）'
+        , batchImport_segmentationHeading: '细分候选'
+        , batchImport_rewriteHeading: '改写结果'
+        , batchImport_noSegmentation: '执行细分后可在此查看候选文本。'
+        , batchImport_noRewrite: '执行改写后可在此查看生成的题目。'
+        , batchImport_candidateMeta: '第 {{page}} 页 · 块 {{block}} · 置信度 {{confidence}}%'
+        , batchImport_problemMeta: '候选：{{candidate}} · 状态：{{status}}'
+        , batchImport_ocrMissing: '处理扫描页面前，请先在 LLM 配置中完善 OCR 代理设置。'
+        , batchImport_skipEmpty: '跳过（未提取到文本）'
     }
   }
 };

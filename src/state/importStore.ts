@@ -36,6 +36,9 @@ export interface CoarseBlock {
   status: CoarseBlockStatus;
   skipReason?: string;
   errorMessage?: string;
+  requiresOcr?: boolean;
+  sourceImage?: string;
+  extractedText?: string;
 }
 
 export interface DetailedCandidate {

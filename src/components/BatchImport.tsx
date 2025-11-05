@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { useImportStore } from '../state/importStore';
 import { extractCoarseBlocksFromPdf, analyzeCoarseBlockWithLLM, rewriteCandidatesWithLLM } from '../lib/pdfPipeline';
+import { ocrWithLLM } from '../lib/llmAdapter';
 import { asyncPool } from '../lib/asyncPool';
 import { downloadBlob } from '../lib/storage';
 
@@ -41,6 +42,12 @@ export function BatchImport() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const generatorAgent = llmAgents.generator;
+  const ocrAgent = llmAgents.ocr;
+
+  const dataUrlToBlob = useCallback(async (url: string): Promise<Blob> => {
+    const response = await fetch(url);
+    return await response.blob();
+  }, []);
 
   const blocksById = useMemo(() => {
     const map = new Map<string, typeof coarseBlocks[number]>();
@@ -68,6 +75,15 @@ export function BatchImport() {
     }
     return true;
   }, [generatorAgent?.config, t]);
+
+  const ensureOcrAgent = useCallback((): boolean => {
+    const cfg = ocrAgent?.config;
+    if (!cfg?.apiKey?.trim() || !cfg?.model?.trim() || !cfg?.baseUrl?.trim()) {
+      alert(t('llmMissingBody', { agent: t('agentOcr') }));
+      return false;
+    }
+    return true;
+  }, [ocrAgent?.config, t]);
 
   const handleSelectPdf = useCallback(async (file: File) => {
     if (!file) return;
@@ -120,7 +136,31 @@ export function BatchImport() {
       await asyncPool(pending, settings.concurrency, async (block) => {
         patchCoarseBlock(block.id, { status: 'processing', errorMessage: undefined });
         try {
-          const candidates = await analyzeCoarseBlockWithLLM(block, generatorAgent, { minConfidence: settings.minConfidence });
+          let preparedText = block.text?.trim() ?? '';
+
+          if (!preparedText && block.requiresOcr && block.sourceImage) {
+            if (!ensureOcrAgent()) {
+              throw new Error(t('batchImport_ocrMissing'));
+            }
+            const blob = await dataUrlToBlob(block.sourceImage);
+            preparedText = (await ocrWithLLM(blob, ocrAgent)).trim();
+            patchCoarseBlock(block.id, {
+              text: preparedText,
+              extractedText: preparedText,
+              requiresOcr: false
+            });
+          }
+
+          if (!preparedText) {
+            patchCoarseBlock(block.id, {
+              status: 'skipped',
+              skipReason: t('batchImport_skipEmpty'),
+              errorMessage: undefined
+            });
+            return;
+          }
+
+          const candidates = await analyzeCoarseBlockWithLLM({ ...block, text: preparedText }, generatorAgent, { minConfidence: settings.minConfidence });
           upsertDetailedCandidates(block.id, candidates);
           patchCoarseBlock(block.id, { status: candidates.length > 0 ? 'completed' : 'skipped' });
         } catch (error: any) {
@@ -131,7 +171,7 @@ export function BatchImport() {
       });
       setStepStatus('detailed', hadError ? 'error' : 'completed');
       if (hadError) {
-        setLocalError(t('batchImport_segmentationPartial')); // We'll add translation key soon
+        setLocalError(t('batchImport_segmentationPartial'));
       }
     } catch (err: any) {
       const message = err?.message ? String(err.message) : String(err);
@@ -141,7 +181,7 @@ export function BatchImport() {
     } finally {
       setBusy(false);
     }
-  }, [ensureGeneratorAgent, coarseBlocks, t, settings.concurrency, settings.minConfidence, patchCoarseBlock, upsertDetailedCandidates, generatorAgent, setBusy, setStepStatus, setError]);
+    }, [ensureGeneratorAgent, ensureOcrAgent, coarseBlocks, t, settings.concurrency, settings.minConfidence, patchCoarseBlock, upsertDetailedCandidates, generatorAgent, ocrAgent, dataUrlToBlob, setBusy, setStepStatus, setError]);
 
   const runRewrite = useCallback(async () => {
     if (!ensureGeneratorAgent()) return;
@@ -217,52 +257,29 @@ export function BatchImport() {
     }
   }, [ensureGeneratorAgent, detailedCandidates.length, t, coarseBlocks, candidatesByBlock, settings.concurrency, settings.topK, generatorAgent, defaults, upsertRewriteResult, setBusy, setStepStatus, setError]);
 
-  const exportCoarse = useCallback(() => {
-    if (!coarseBlocks.length) {
-      alert(t('batchImport_noBlocks'));
-      return;
-    }
-    const payload = JSON.stringify({
-      pdf: pdfMeta,
-      pages,
-      blocks: coarseBlocks.map(({ id, pageId, pageNumber, rect, text, stats, status, skipReason, errorMessage }) => ({
-        id,
-        pageId,
-        pageNumber,
-        rect,
-        text,
-        stats,
-        status,
-        skipReason,
-        errorMessage
-      }))
-    }, null, 2);
-    downloadBlob(new Blob([payload], { type: 'application/json' }), `coarse-${Date.now()}.json`);
-  }, [coarseBlocks, pdfMeta, pages, t]);
+    const exportDetailed = useCallback(() => {
+      if (!detailedCandidates.length) {
+        alert(t('batchImport_noCandidates'));
+        return;
+      }
+      const payload = JSON.stringify({
+        pdf: pdfMeta,
+        candidates: detailedCandidates
+      }, null, 2);
+      downloadBlob(new Blob([payload], { type: 'application/json' }), `segmented-${Date.now()}.json`);
+    }, [detailedCandidates, pdfMeta, t]);
 
-  const exportDetailed = useCallback(() => {
-    if (!detailedCandidates.length) {
-      alert(t('batchImport_noCandidates'));
-      return;
-    }
-    const payload = JSON.stringify({
-      pdf: pdfMeta,
-      candidates: detailedCandidates
-    }, null, 2);
-    downloadBlob(new Blob([payload], { type: 'application/json' }), `segmented-${Date.now()}.json`);
-  }, [detailedCandidates, pdfMeta, t]);
-
-  const exportRewrites = useCallback(() => {
-    if (!rewriteResults.length) {
-      alert(t('batchImport_noRewrites'));
-      return;
-    }
-    const payload = JSON.stringify({
-      pdf: pdfMeta,
-      rewrites: rewriteResults
-    }, null, 2);
-    downloadBlob(new Blob([payload], { type: 'application/json' }), `rewrites-${Date.now()}.json`);
-  }, [rewriteResults, pdfMeta, t]);
+    const exportRewrites = useCallback(() => {
+      if (!rewriteResults.length) {
+        alert(t('batchImport_noRewrites'));
+        return;
+      }
+      const payload = JSON.stringify({
+        pdf: pdfMeta,
+        rewrites: rewriteResults
+      }, null, 2);
+      downloadBlob(new Blob([payload], { type: 'application/json' }), `rewrites-${Date.now()}.json`);
+    }, [rewriteResults, pdfMeta, t]);
 
   const acceptCurrent = useCallback(() => {
     if (!currentReview || currentReview.status !== 'converted' || !currentReview.patch) {
@@ -294,19 +311,37 @@ export function BatchImport() {
     setLocalError(null);
   }, [isBusy, reset]);
 
-  const stats = useMemo(() => {
-    const totalBlocks = coarseBlocks.length;
-    const segmented = detailedCandidates.reduce((acc, candidate) => {
-      acc.add(candidate.blockId);
-      return acc;
-    }, new Set<string>());
-    const converted = rewriteResults.filter((rewrite) => rewrite.status === 'converted');
+  const segmentationStats = useMemo(() => {
+    const total = coarseBlocks.length;
+    const completed = coarseBlocks.filter((block) => block.status === 'completed').length;
+    const skipped = coarseBlocks.filter((block) => block.status === 'skipped').length;
+    const errors = coarseBlocks.filter((block) => block.status === 'error').length;
+    const processing = coarseBlocks.filter((block) => block.status === 'processing').length;
     return {
-      totalBlocks,
-      segmentedBlocks: segmented.size,
-      converted: converted.length
+      total,
+      completed,
+      skipped,
+      errors,
+      processing,
+      done: completed + skipped + errors
     };
-  }, [coarseBlocks, detailedCandidates, rewriteResults]);
+  }, [coarseBlocks]);
+
+  const rewriteStats = useMemo(() => {
+    const total = rewriteResults.length;
+    const converted = rewriteResults.filter((rewrite) => rewrite.status === 'converted').length;
+    const skipped = rewriteResults.filter((rewrite) => rewrite.status === 'skipped').length;
+    const errors = rewriteResults.filter((rewrite) => rewrite.status === 'error').length;
+    const processing = rewriteResults.filter((rewrite) => rewrite.status === 'processing').length;
+    return {
+      total,
+      converted,
+      skipped,
+      errors,
+      processing,
+      done: converted + skipped + errors
+    };
+  }, [rewriteResults]);
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -331,7 +366,7 @@ export function BatchImport() {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className="label" style={{ margin: 0 }}>{t('batchImport_settings')}</div>
           <label className="small" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -370,28 +405,95 @@ export function BatchImport() {
           </label>
         </div>
 
-        <div className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div className="label" style={{ margin: 0 }}>{t('batchImport_progress')}</div>
-          <div className="small">{t('batchImport_blocksDetected', { value: stats.totalBlocks })}</div>
-          <div className="small">{t('batchImport_blocksSegmented', { value: stats.segmentedBlocks })}</div>
-          <div className="small">{t('batchImport_converted', { value: stats.converted })}</div>
-          <div className="small">{t('batchImport_statusCoarse', { status: t(`batchImport_status_${stepStatus.coarse}`) })}</div>
-          <div className="small">{t('batchImport_statusDetailed', { status: t(`batchImport_status_${stepStatus.detailed}`) })}</div>
-          <div className="small">{t('batchImport_statusRewrite', { status: t(`batchImport_status_${stepStatus.rewrite}`) })}</div>
-        </div>
+          <div className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="label" style={{ margin: 0 }}>{t('batchImport_progress')}</div>
+            <div className="small">{t('batchImport_statusCoarse', { status: t(`batchImport_status_${stepStatus.coarse}`) })}</div>
+            <div className="small">{t('batchImport_statusDetailed', { status: t(`batchImport_status_${stepStatus.detailed}`) })}</div>
+            <div className="small">{t('batchImport_statusRewrite', { status: t(`batchImport_status_${stepStatus.rewrite}`) })}</div>
+            <div className="small">{t('batchImport_progressSegmentation', {
+              done: segmentationStats.done,
+              total: segmentationStats.total,
+              processing: segmentationStats.processing,
+              errors: segmentationStats.errors
+            })}</div>
+            <div className="small">{t('batchImport_progressRewrite', {
+              done: rewriteStats.done,
+              total: rewriteStats.total,
+              processing: rewriteStats.processing,
+              errors: rewriteStats.errors
+            })}</div>
+          </div>
       </div>
 
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
         <button onClick={runSegmentation} disabled={isBusy || !coarseBlocks.length}>{t('batchImport_runSegmentation')}</button>
         <button onClick={runRewrite} disabled={isBusy || !detailedCandidates.length}>{t('batchImport_runRewrite')}</button>
-        <button onClick={exportCoarse} disabled={!coarseBlocks.length}>{t('batchImport_exportCoarse')}</button>
         <button onClick={exportDetailed} disabled={!detailedCandidates.length}>{t('batchImport_exportDetailed')}</button>
         <button onClick={exportRewrites} disabled={!rewriteResults.length}>{t('batchImport_exportRewrites')}</button>
       </div>
 
-      {(error || localError) && (
-        <div className="small" style={{ color: '#f87171' }}>{error || localError}</div>
-      )}
+        {(error || localError) && (
+          <div className="small" style={{ color: '#f87171' }}>{error || localError}</div>
+        )}
+
+        <div className="grid" style={{ gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12 }}>
+            <div className="label" style={{ margin: 0 }}>{t('batchImport_segmentationHeading')}</div>
+            {detailedCandidates.length === 0 ? (
+              <span className="small" style={{ color: 'var(--text-muted)' }}>{t('batchImport_noSegmentation')}</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+                {detailedCandidates.map((candidate) => {
+                  const preview = candidate.text.length > 240 ? `${candidate.text.slice(0, 240)}…` : candidate.text;
+                  return (
+                    <div key={candidate.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 8, background: 'var(--surface-subtle)' }}>
+                      <div className="small" style={{ fontWeight: 600 }}>
+                        {t('batchImport_candidateMeta', {
+                          page: candidate.pageNumber,
+                          block: candidate.blockId,
+                          confidence: Math.round(candidate.confidence * 100)
+                        })}
+                      </div>
+                      <div className="small" style={{ color: 'var(--text-muted)' }}>{candidate.classification}</div>
+                      <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0 0', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem' }}>{preview}</pre>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12 }}>
+            <div className="label" style={{ margin: 0 }}>{t('batchImport_rewriteHeading')}</div>
+            {rewriteResults.length === 0 ? (
+              <span className="small" style={{ color: 'var(--text-muted)' }}>{t('batchImport_noRewrite')}</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
+                {rewriteResults.map((rewrite) => {
+                  const questionPreview = rewrite.patch?.question ? rewrite.patch.question.slice(0, 200) : '';
+                  return (
+                    <div key={rewrite.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 8, background: 'var(--surface-subtle)' }}>
+                      <div className="small" style={{ fontWeight: 600 }}>
+                        {t('batchImport_problemMeta', {
+                          candidate: rewrite.chosenCandidateId || t('batchImport_none'),
+                          status: rewrite.status
+                        })}
+                      </div>
+                      {questionPreview ? (
+                        <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0 0', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem' }}>
+                          {questionPreview}
+                          {rewrite.patch?.question && rewrite.patch.question.length > 200 ? '…' : ''}
+                        </pre>
+                      ) : (
+                        <span className="small" style={{ color: rewrite.status === 'error' ? '#f87171' : 'var(--text-muted)' }}>{rewrite.reason || rewrite.message || t('batchImport_unavailable')}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
       {rewriteResults.length > 0 && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

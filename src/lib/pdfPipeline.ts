@@ -228,6 +228,33 @@ const extractPageData = async (pdf: PDFDocumentProxy, pageNumber: number, option
     dataUrl
   };
 
+  if (blocks.length === 0) {
+    blocks.push({
+      id: `${pageId}-img` as string,
+      pageId,
+      pageNumber,
+      index: 0,
+      rect: {
+        x: 0,
+        y: 0,
+        width: viewport.width,
+        height: viewport.height
+      },
+      text: '',
+      stats: {
+        lineCount: 0,
+        textLength: 0
+      },
+      status: 'pending',
+      requiresOcr: true,
+      sourceImage: dataUrl
+    });
+  } else {
+    blocks.forEach((block) => {
+      block.sourceImage = dataUrl;
+    });
+  }
+
   return { pageMeta, blocks };
 };
 
