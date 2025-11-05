@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "dexie": "^4.0.8",
+    "pdfjs-dist": "^4.6.82",
     "i18next": "^23.14.0",
     "jszip": "^3.10.1",
     "react": "^18.3.1",
