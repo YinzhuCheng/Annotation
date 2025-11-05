@@ -1,4 +1,5 @@
 import type { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
+import type { QualityReport } from '../state/importStore';
 import { chatStream } from './llmAdapter';
 
 export interface CandidateForGeneration {
@@ -16,6 +17,7 @@ export interface CandidateGenerationOutcome {
   raw: string;
   reason?: string;
   message?: string;
+  qualityReport?: QualityReport;
 }
 
 interface LlmGenerationPayload {
@@ -84,32 +86,50 @@ const buildPrompt = (
     lines.push(buildCandidateBlock(candidate, index));
     lines.push('');
   });
+  lines.push('## Rubric');
+  lines.push('You must follow this checklist when deciding whether a candidate can be converted:');
+  lines.push('1. Appropriate difficulty: the final problem should feel like advanced coursework or research-level, not trivial.');
+  lines.push('2. Self-containment: include all necessary context so the problem can be solved without the source material.');
+  lines.push('3. No leakage: do not expose intermediate steps, proof outlines, or the final result itself.');
+  lines.push('4. Single-answer constraint: exactly one well-defined solution.');
+  lines.push('5. Quantitative verifiability: answer is a concrete quantitative object (number, closed-form, distribution, rate, or bound with explicit constants).');
+  lines.push('If any item fails, you must either pick another candidate or skip conversion.');
+  lines.push('');
   lines.push('## Output Requirements');
-  lines.push('Respond with pure JSON only, no commentary.');
-  lines.push('Schema: {');
-  lines.push('  "chosenCandidateId": string (use "none" if skipping),');
+  lines.push('Return pure JSON with the shape:');
+  lines.push('{');
+  lines.push('  "chosenCandidateId": string ("none" if skipping),');
   lines.push('  "reason": string,');
-  lines.push('  "problem": {');
-  lines.push('    "question": string,');
-  lines.push(`    "options": string[${optionCount}] (exactly ${optionCount} options, ordered A, B, C, ...),`);
-  lines.push('    "answer": string (for multiple choice, provide the correct option letter),');
-  lines.push('    "subfield": string (from allowed list),');
-  lines.push('    "academicLevel": string (from allowed list),');
-  lines.push('    "difficulty": string (from allowed list)');
-  lines.push('  } | null');
-  lines.push('}');
-  lines.push('If chosenCandidateId is "none", set problem to null and provide a clear reason.');
+  lines.push('  "quality": {');
+  lines.push('    "difficulty": string (describe the perceived difficulty),');
+  lines.push('    "selfContainment": boolean,');
+    lines.push('    "noLeakage": boolean,');
+    lines.push('    "singleAnswer": boolean,');
+    lines.push('    "quantitative": boolean,');
+    lines.push('    "overall": "pass" | "fail",');
+    lines.push('    "notes": string');
+    lines.push('  },');
+    lines.push('  "problem": {');
+    lines.push('    "question": string,');
+    lines.push(`    "options": string[${optionCount}] (exactly ${optionCount} options, ordered A, B, C, ...),`);
+    lines.push('    "answer": string (for multiple choice, provide the correct option letter),');
+    lines.push('    "subfield": string (from allowed list),');
+    lines.push('    "academicLevel": string (from allowed list),');
+    lines.push('    "difficulty": string (from allowed list)');
+    lines.push('  } | null');
+    lines.push('}');
+    lines.push('When "chosenCandidateId" is "none", set problem to null and explain the failure in "reason" and "quality".');
+  lines.push('The JSON must not contain trailing commas or additional commentary.');
   lines.push('');
   lines.push('Allowed subfields: ' + defaults.subfieldOptions.join('; '));
   lines.push('Allowed academic levels: ' + defaults.academicLevels.join('; '));
   lines.push('Allowed difficulties: ' + defaults.difficultyOptions.join('; '));
   lines.push('');
   lines.push('Guidelines:');
-  lines.push('- Pick at most one candidate.');
-  lines.push('- Skip definitions/theorems/summaries that lack a direct question.');
-  lines.push('- Skip anything that clearly references figures or diagrams.');
-  lines.push('- When converting, keep the mathematical intent intact and ensure the solution is unique and consistent.');
-  lines.push('- Produce concise, MathJax-compatible expressions (no Markdown code fences).');
+  lines.push('- Pick at most one candidate. If none satisfy the rubric, respond with "chosenCandidateId": "none".');
+  lines.push('- Skip content that is purely definitional, descriptive, or dependent on diagrams.');
+  lines.push('- The final problem must match the rubric items listed above.');
+  lines.push('- Provide MathJax-compatible expressions (no Markdown fences).');
   lines.push('- Answer must be the capital letter of the correct option.');
   return lines.join('\n');
 };
@@ -199,12 +219,26 @@ export const generateProblemFromCandidates = async (
   const chosenCandidateId = chosenIdRaw.length > 0 ? chosenIdRaw : null;
   const reason = sanitize(parsed.reason || '');
 
+  const qualityRaw = parsed.quality;
+  const qualityReport: QualityReport | null = qualityRaw && typeof qualityRaw === 'object'
+    ? {
+        difficulty: sanitize((qualityRaw as any).difficulty),
+        selfContainment: Boolean((qualityRaw as any).selfContainment),
+        noLeakage: Boolean((qualityRaw as any).noLeakage),
+        singleAnswer: Boolean((qualityRaw as any).singleAnswer),
+        quantitative: Boolean((qualityRaw as any).quantitative),
+        overall: ((qualityRaw as any).overall === 'pass' ? 'pass' : (qualityRaw as any).overall === 'fail' ? 'fail' : 'fail'),
+        notes: sanitize((qualityRaw as any).notes)
+      }
+    : null;
+
   if (!chosenCandidateId || chosenCandidateId.toLowerCase() === 'none') {
     return {
       status: 'skipped',
       chosenCandidateId: null,
       raw,
-      reason: reason || 'Model indicated no suitable candidate.'
+      reason: reason || 'Model indicated no suitable candidate.',
+      qualityReport: qualityReport || undefined
     };
   }
 
@@ -224,7 +258,8 @@ export const generateProblemFromCandidates = async (
       status: 'error',
       chosenCandidateId,
       raw,
-      message: 'LLM omitted problem payload despite selecting a candidate.'
+      message: 'LLM omitted problem payload despite selecting a candidate.',
+      qualityReport: qualityReport || undefined
     };
   }
 
@@ -251,7 +286,8 @@ export const generateProblemFromCandidates = async (
       status: 'error',
       chosenCandidateId,
       raw,
-      message: `Missing or invalid fields: ${issues.join(', ')}`
+      message: `Missing or invalid fields: ${issues.join(', ')}`,
+      qualityReport: qualityReport || undefined
     };
   }
 
@@ -260,6 +296,7 @@ export const generateProblemFromCandidates = async (
     chosenCandidateId,
     patch,
     raw,
-    reason: reason || undefined
+    reason: reason || undefined,
+    qualityReport: qualityReport || undefined
   };
 };

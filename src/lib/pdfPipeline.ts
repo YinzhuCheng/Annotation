@@ -5,6 +5,7 @@ import type { LLMAgentSettings, DefaultSettings } from '../state/store';
 import type { CoarseBlock, DetailedCandidate, PdfPageMeta } from '../state/importStore';
 import { chatStream } from './llmAdapter';
 import { generateProblemFromCandidates, type CandidateForGeneration, type CandidateGenerationOutcome } from './questionGenerator';
+import type { QualityReport } from '../state/importStore';
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 

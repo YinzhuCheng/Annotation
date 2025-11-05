@@ -70,6 +70,18 @@ export interface RewriteResult {
   message?: string;
   accepted?: boolean;
   createdAt: number;
+  qualityReport?: QualityReport;
+  editedProblemId?: string;
+}
+
+export interface QualityReport {
+  difficulty: string;
+  selfContainment: boolean;
+  noLeakage: boolean;
+  singleAnswer: boolean;
+  quantitative: boolean;
+  overall: 'pass' | 'fail';
+  notes?: string;
 }
 
 export interface ImportSettings {
@@ -104,6 +116,7 @@ export interface ImportState {
   setDetailedCandidatesBulk: (candidates: DetailedCandidate[]) => void;
   upsertRewriteResult: (result: RewriteResult) => void;
   patchRewriteResult: (rewriteId: string, patch: Partial<RewriteResult>) => void;
+  setRewriteResults: (items: RewriteResult[]) => void;
   markAccepted: (rewriteId: string) => void;
   setReviewCursor: (index: number) => void;
   setStepStatus: (step: keyof ImportState['stepStatus'], status: StepStatus) => void;
@@ -185,6 +198,9 @@ export const useImportStore = create<ImportState>((set, get) => ({
     set((state) => ({
       rewriteResults: state.rewriteResults.map((entry) => (entry.id === rewriteId ? { ...entry, ...patch } : entry))
     }));
+  },
+  setRewriteResults: (items) => {
+    set({ rewriteResults: [...items] });
   },
   markAccepted: (rewriteId) => {
     set((state) => ({
