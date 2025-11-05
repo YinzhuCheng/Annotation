@@ -6,6 +6,7 @@ import { LLMConfig } from './components/LLMConfig';
 import { ProblemEditor } from './components/ProblemEditor';
 import { ImportExport } from './components/ImportExport';
 import { ImageComposer } from './components/ImageComposer';
+import { BatchImport } from './components/BatchImport';
 import { useAppStore } from './state/store';
 import { estimateStorage } from './lib/storage';
 import { DefaultsPage } from './components/DefaultsPage';
@@ -111,6 +112,9 @@ export default function App() {
             </div>
           )}
         </div>
+      <div style={{marginTop:16}}>
+        <BatchImport />
+      </div>
 
         <div className="card" style={{marginTop:16}}>
           <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
