@@ -1,7 +1,7 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
-interface ParsedGeneratedQuestion {
+export interface ParsedGeneratedQuestion {
   question: string;
   questionType: string;
   options: string[];
@@ -320,7 +320,7 @@ export async function generateProblemFromText(
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
     conversation?: GeneratorConversationTurn[];
   }
-): Promise<{ patch: Partial<ProblemRecord>; raw: string }> {
+): Promise<{ patch: Partial<ProblemRecord>; raw: string; generatedBlock: string; parsed: ParsedGeneratedQuestion }> {
   const baseInput = input.trim();
   const sanitizedInput = baseInput || '(no additional source text)';
   const targetType = existing.questionType;
@@ -561,5 +561,135 @@ export async function generateProblemFromText(
     throw new LLMGenerationError(message, raw);
   }
 
-  return { patch, raw };
+  return { patch, raw, generatedBlock: generatedSection, parsed: extracted };
+}
+
+const parseReviewerJson = (raw: string): { status?: string; issues?: unknown; feedback?: unknown } | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const attempt = (payload: string) => {
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  };
+  const direct = attempt(trimmed);
+  if (direct) return direct;
+  const firstIdx = trimmed.indexOf('{');
+  const lastIdx = trimmed.lastIndexOf('}');
+  if (firstIdx !== -1 && lastIdx !== -1 && lastIdx > firstIdx) {
+    const slice = trimmed.slice(firstIdx, lastIdx + 1);
+    return attempt(slice);
+  }
+  return null;
+};
+
+const normalizeIssues = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === 'string' ? item.trim() : String(item))).filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value.split(/\n|;/).map((item) => item.trim()).filter((item) => item.length > 0);
+  }
+  return [];
+};
+
+export interface ReviewAuditResult {
+  status: 'pass' | 'fail';
+  issues: string[];
+  feedback: string;
+  raw: string;
+}
+
+export async function reviewGeneratedQuestion(
+  draft: {
+    raw: string;
+    generatedBlock: string;
+    parsed: ParsedGeneratedQuestion;
+    patch: Partial<ProblemRecord>;
+    targetType: ProblemRecord['questionType'];
+  },
+  agent: LLMAgentSettings,
+  options?: {
+    onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
+  }
+): Promise<ReviewAuditResult> {
+  const effectiveType: ProblemRecord['questionType'] = (draft.patch.questionType as ProblemRecord['questionType']) || draft.targetType;
+  const questionText = draft.patch.question || draft.parsed.question;
+  const answerText = draft.patch.answer || draft.parsed.answer;
+  const subfieldText = draft.patch.subfield || draft.parsed.subfield;
+  const academicText = draft.patch.academicLevel || draft.parsed.academicLevel;
+  const difficultyText = draft.patch.difficulty || draft.parsed.difficulty;
+  const optionsSource = Array.isArray(draft.patch.options) && draft.patch.options.length > 0
+    ? draft.patch.options
+    : draft.parsed.options;
+  const normalizedOptions = effectiveType === 'Multiple Choice'
+    ? optionsSource
+      .map((opt) => (typeof opt === 'string' ? opt.trim() : ''))
+      .filter((opt) => opt.length > 0)
+    : [];
+
+  const optionLines = normalizedOptions.map((opt, idx) => `${String.fromCharCode(65 + idx)}. ${opt}`);
+
+  const guidelines: string[] = [];
+  guidelines.push('1. Clarity: the question must be understandable, contain no undefined terminology, and avoid ambiguous phrasing.');
+  guidelines.push('2. Multiple Choice validation: ensure options are distinct, the stated answer maps to exactly one option label, and no other option obviously shares the same truth value.');
+  guidelines.push('3. Formatting: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer).');
+  guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
+
+  const lines: string[] = [];
+  lines.push('## Review Goals');
+  lines.push(...guidelines);
+  lines.push('');
+  lines.push('## Parsed Fields');
+  lines.push(`questionType: ${effectiveType}`);
+  lines.push(`subfield: ${subfieldText || '<missing>'}`);
+  lines.push(`academicLevel: ${academicText || '<missing>'}`);
+  lines.push(`difficulty: ${difficultyText || '<missing>'}`);
+  lines.push('');
+  lines.push('Question:');
+  lines.push(questionText || '<missing>');
+  lines.push('');
+  if (effectiveType === 'Multiple Choice') {
+    lines.push('Options:');
+    if (optionLines.length === 0) {
+      lines.push('<missing>');
+    } else {
+      lines.push(...optionLines);
+    }
+    lines.push('');
+  } else {
+    lines.push('Options: (none expected)');
+    lines.push('');
+  }
+  lines.push('Answer:');
+  lines.push(answerText || '<missing>');
+  lines.push('');
+  lines.push('## Generated Question Block');
+  lines.push(draft.generatedBlock);
+  lines.push('');
+  lines.push('## Full Model Response');
+  lines.push(draft.raw);
+
+  const system = agent.prompt?.trim() || DEFAULT_AGENT_PROMPTS.reviewer;
+  const rawReview = await chatStream([
+    { role: 'system', content: system },
+    { role: 'user', content: lines.join('\n') }
+  ], agent.config, { temperature: 0 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
+
+  const parsed = parseReviewerJson(rawReview);
+  const status: 'pass' | 'fail' = parsed?.status === 'pass' ? 'pass' : 'fail';
+  const issues = normalizeIssues(parsed?.issues);
+  const feedback = typeof parsed?.feedback === 'string' ? parsed.feedback.trim() : '';
+  const normalizedRaw = rawReview.trim();
+  const finalIssues = status === 'fail'
+    ? (issues.length > 0 ? issues : ['Reviewer marked status as fail but did not provide specific issues.'])
+    : issues;
+  return {
+    status,
+    issues: finalIssues,
+    feedback: feedback || (status === 'pass' ? 'All checks passed.' : ''),
+    raw: normalizedRaw || rawReview
+  };
 }

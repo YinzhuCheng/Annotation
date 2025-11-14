@@ -9,7 +9,7 @@ export interface LLMConfigState {
   model: string;
 }
 
-export type AgentId = 'ocr' | 'latex' | 'generator' | 'translator';
+export type AgentId = 'ocr' | 'latex' | 'generator' | 'reviewer' | 'translator';
 
 export interface LLMAgentSettings {
   config: LLMConfigState;
@@ -23,6 +23,7 @@ export interface DefaultSettings {
   difficultyOptions: string[];
   difficultyPrompt: string;
   optionsCount: number; // default 5
+  maxReviewRounds: number;
 }
 
 const SUPPORTED_PROVIDERS = new Set<LLMConfigState['provider']>(['openai', 'gemini', 'claude']);
@@ -60,6 +61,7 @@ export const DEFAULT_DIFFICULTY_OPTIONS: string[] = ['1', '2', '3'];
 export const DEFAULT_DIFFICULTY_PROMPT = 'Difficulty (1=easy, 3=hard)';
 
 const DEFAULT_OPTIONS_COUNT = 5;
+const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
 const DEFAULT_AGENT_PROMPTS: Record<AgentId, string> = {
   ocr: `You are a meticulous OCR engine for mathematical documents. Extract every piece of readable text from the provided image and return plain UTF-8 text only.
@@ -94,9 +96,23 @@ Guidelines:
 - Maintain bullet lists, numbering, and paragraph breaks.
 - Retain proper nouns and technical terms in a consistent, context-appropriate form.
 - Return only the translated text without explanations or back-translations.`
+  ,
+  reviewer: `You are a meticulous QA reviewer for structured math problems. You will receive the full <Generated Question> block plus parsed fields. Assess the draft and reply with strict JSON using double quotes:
+{
+  "status": "pass" | "fail",
+  "issues": ["description 1", "description 2"],
+  "feedback": "Actionable summary"
+}
+
+Pass only if:
+1. The question text is clear, contains no undefined terminology, and has no ambiguity.
+2. The output preserves the exact contract structure (<Generated Question> block with required fields).
+3. For Multiple Choice, there are at least two options, exactly one correct choice, and the stated answer matches that option.
+
+When failing, list each issue in "issues" and ensure "feedback" briefly explains how to fix them. Do not include any other text.`
 };
 
-const AGENT_IDS: AgentId[] = ['ocr', 'latex', 'generator', 'translator'];
+const AGENT_IDS: AgentId[] = ['ocr', 'latex', 'generator', 'reviewer', 'translator'];
 
 function sanitizeList(input: unknown, fallback: string[]): string[] {
   const arr = Array.isArray(input) ? input : [];
@@ -131,6 +147,8 @@ function sanitizeAgentSettings(input: Partial<LLMAgentSettings> | undefined, fal
 function sanitizeDefaults(partial?: Partial<DefaultSettings> & Record<string, unknown>): DefaultSettings {
   const optionsCountRaw = typeof partial?.optionsCount === 'number' ? partial!.optionsCount : DEFAULT_OPTIONS_COUNT;
   const optionsCount = Math.max(2, Math.min(10, Math.floor(optionsCountRaw)));
+  const maxReviewRaw = typeof partial?.maxReviewRounds === 'number' ? partial!.maxReviewRounds : DEFAULT_MAX_REVIEW_ROUNDS;
+  const maxReviewRounds = Math.max(1, Math.min(10, Math.floor(maxReviewRaw)));
   const difficultyPrompt = typeof partial?.difficultyPrompt === 'string' && partial.difficultyPrompt.trim().length > 0
     ? partial.difficultyPrompt.trim()
     : DEFAULT_DIFFICULTY_PROMPT;
@@ -140,7 +158,8 @@ function sanitizeDefaults(partial?: Partial<DefaultSettings> & Record<string, un
     academicLevels: sanitizeList((partial as any)?.academicLevels, DEFAULT_ACADEMIC_LEVELS),
     difficultyOptions: sanitizeList((partial as any)?.difficultyOptions, DEFAULT_DIFFICULTY_OPTIONS),
     difficultyPrompt,
-    optionsCount
+    optionsCount,
+    maxReviewRounds
   };
 }
 
@@ -198,12 +217,13 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as Record<string, any>;
-      const sanitized: Record<AgentId, LLMAgentSettings> = {
-        ocr: sanitizeAgentSettings(parsed?.ocr, DEFAULT_AGENT_PROMPTS.ocr),
-        latex: sanitizeAgentSettings(parsed?.latex, DEFAULT_AGENT_PROMPTS.latex),
-        generator: sanitizeAgentSettings(parsed?.generator, DEFAULT_AGENT_PROMPTS.generator),
-        translator: sanitizeAgentSettings(parsed?.translator, DEFAULT_AGENT_PROMPTS.translator)
-      };
+        const sanitized: Record<AgentId, LLMAgentSettings> = {
+          ocr: sanitizeAgentSettings(parsed?.ocr, DEFAULT_AGENT_PROMPTS.ocr),
+          latex: sanitizeAgentSettings(parsed?.latex, DEFAULT_AGENT_PROMPTS.latex),
+          generator: sanitizeAgentSettings(parsed?.generator, DEFAULT_AGENT_PROMPTS.generator),
+          reviewer: sanitizeAgentSettings(parsed?.reviewer, DEFAULT_AGENT_PROMPTS.reviewer),
+          translator: sanitizeAgentSettings(parsed?.translator, DEFAULT_AGENT_PROMPTS.translator)
+        };
       localStorage.setItem('llm-agents', JSON.stringify(sanitized));
       return sanitized;
     } catch {}
@@ -213,12 +233,13 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
   if (legacyRaw) {
     try { legacyConfig = sanitizeLLMConfig(JSON.parse(legacyRaw)); } catch {}
   }
-  const fallback: Record<AgentId, LLMAgentSettings> = {
-    ocr: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.ocr },
-    latex: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.latex },
-    generator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.generator },
-    translator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.translator }
-  };
+    const fallback: Record<AgentId, LLMAgentSettings> = {
+      ocr: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.ocr },
+      latex: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.latex },
+      generator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.generator },
+      reviewer: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.reviewer },
+      translator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.translator }
+    };
   localStorage.setItem('llm-agents', JSON.stringify(fallback));
   return fallback;
 })();
