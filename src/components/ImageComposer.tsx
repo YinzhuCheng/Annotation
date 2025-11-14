@@ -513,7 +513,7 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
           <div key={b.id} className="card">
             <div className="row" style={{justifyContent:'space-between', marginBottom:8}}>
               <strong>{b.type === 'single' ? t('singleBlock') : b.type === 'options' ? t('optionBlock') : t('customBlock')}</strong>
-              <button onClick={() => removeBlock(b.id)}>?</button>
+              <button onClick={() => removeBlock(b.id)}>x</button>
             </div>
             {b.type === 'single' ? (
               <div
