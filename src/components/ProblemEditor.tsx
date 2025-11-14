@@ -1298,9 +1298,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         }}
       >
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <button className="primary" onClick={() => store.newProblem()}>
-            {t("newProblem")}
-          </button>
           <button onClick={handleSaveCurrent}>{t("saveProblem")}</button>
           <button
             onClick={() => {
