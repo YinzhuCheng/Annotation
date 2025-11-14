@@ -1,7 +1,7 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
-interface ParsedGeneratedQuestion {
+export interface ParsedGeneratedQuestion {
   question: string;
   questionType: string;
   options: string[];
@@ -320,7 +320,7 @@ export async function generateProblemFromText(
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
     conversation?: GeneratorConversationTurn[];
   }
-): Promise<{ patch: Partial<ProblemRecord>; raw: string }> {
+): Promise<{ patch: Partial<ProblemRecord>; raw: string; generatedBlock: string; parsed: ParsedGeneratedQuestion }> {
   const baseInput = input.trim();
   const sanitizedInput = baseInput || '(no additional source text)';
   const targetType = existing.questionType;
@@ -414,13 +414,13 @@ export async function generateProblemFromText(
   userLines.push('   - 1. Feedback alignment - reference each bullet from the Feedback Summary (or explicitly state that none exists) and describe how you will address it.');
   userLines.push('   - 2. Mathematical study - analyze the source problem like a teacher, noting key concepts, invariants, and solution strategies.');
   userLines.push('   - 3. Adaptation plan - explain how you will reshape the problem to fit the target question type while preserving the core mathematical idea.');
-  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
+  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). All narrative text and labels must be written in English even if the source materials are in other languages. If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
   userLines.push('   - Keep questionType exactly equal to the target type.');
   userLines.push('   - Choose subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when nothing fits).');
   userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
   userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
   userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
-  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions.');
+  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions; do not wrap math in Markdown fences.');
   userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
   userLines.push('5. Integrate insights from all prior rounds instead of restarting from scratch.');
   userLines.push('');
@@ -561,5 +561,136 @@ export async function generateProblemFromText(
     throw new LLMGenerationError(message, raw);
   }
 
-  return { patch, raw };
+  return { patch, raw, generatedBlock: generatedSection, parsed: extracted };
+}
+
+const parseReviewerJson = (raw: string): { status?: string; issues?: unknown; feedback?: unknown } | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const attempt = (payload: string) => {
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  };
+  const direct = attempt(trimmed);
+  if (direct) return direct;
+  const firstIdx = trimmed.indexOf('{');
+  const lastIdx = trimmed.lastIndexOf('}');
+  if (firstIdx !== -1 && lastIdx !== -1 && lastIdx > firstIdx) {
+    const slice = trimmed.slice(firstIdx, lastIdx + 1);
+    return attempt(slice);
+  }
+  return null;
+};
+
+const normalizeIssues = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === 'string' ? item.trim() : String(item))).filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value.split(/\n|;/).map((item) => item.trim()).filter((item) => item.length > 0);
+  }
+  return [];
+};
+
+export interface ReviewAuditResult {
+  status: 'pass' | 'fail';
+  issues: string[];
+  feedback: string;
+  raw: string;
+}
+
+export async function reviewGeneratedQuestion(
+  draft: {
+    raw: string;
+    generatedBlock: string;
+    parsed: ParsedGeneratedQuestion;
+    patch: Partial<ProblemRecord>;
+    targetType: ProblemRecord['questionType'];
+  },
+  agent: LLMAgentSettings,
+  options?: {
+    onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
+  }
+): Promise<ReviewAuditResult> {
+  const effectiveType: ProblemRecord['questionType'] = (draft.patch.questionType as ProblemRecord['questionType']) || draft.targetType;
+  const questionText = draft.patch.question || draft.parsed.question;
+  const answerText = draft.patch.answer || draft.parsed.answer;
+  const subfieldText = draft.patch.subfield || draft.parsed.subfield;
+  const academicText = draft.patch.academicLevel || draft.parsed.academicLevel;
+  const difficultyText = draft.patch.difficulty || draft.parsed.difficulty;
+  const optionsSource = Array.isArray(draft.patch.options) && draft.patch.options.length > 0
+    ? draft.patch.options
+    : draft.parsed.options;
+  const normalizedOptions = effectiveType === 'Multiple Choice'
+    ? optionsSource
+      .map((opt) => (typeof opt === 'string' ? opt.trim() : ''))
+      .filter((opt) => opt.length > 0)
+    : [];
+
+  const optionLines = normalizedOptions.map((opt, idx) => `${String.fromCharCode(65 + idx)}. ${opt}`);
+
+  const guidelines: string[] = [];
+  guidelines.push('1. Clarity: the question must be understandable, contain no undefined terminology, and avoid ambiguous phrasing.');
+  guidelines.push('2. Multiple Choice validation: ensure options are distinct, the stated answer maps to exactly one option label, and no other option obviously shares the same truth value.');
+  guidelines.push('3. Formatting & MathJax: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer), and every mathematical expression must be valid MathJax (no unsupported environments or Markdown fences).');
+  guidelines.push('4. Language: all narrative content, labels, and explanations must be written in English; flag any non-English words (aside from standard mathematical symbols).');
+  guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
+
+  const lines: string[] = [];
+  lines.push('## Review Goals');
+  lines.push(...guidelines);
+  lines.push('');
+  lines.push('## Parsed Fields');
+  lines.push(`questionType: ${effectiveType}`);
+  lines.push(`subfield: ${subfieldText || '<missing>'}`);
+  lines.push(`academicLevel: ${academicText || '<missing>'}`);
+  lines.push(`difficulty: ${difficultyText || '<missing>'}`);
+  lines.push('');
+  lines.push('Question:');
+  lines.push(questionText || '<missing>');
+  lines.push('');
+  if (effectiveType === 'Multiple Choice') {
+    lines.push('Options:');
+    if (optionLines.length === 0) {
+      lines.push('<missing>');
+    } else {
+      lines.push(...optionLines);
+    }
+    lines.push('');
+  } else {
+    lines.push('Options: (none expected)');
+    lines.push('');
+  }
+  lines.push('Answer:');
+  lines.push(answerText || '<missing>');
+  lines.push('');
+  lines.push('## Generated Question Block');
+  lines.push(draft.generatedBlock);
+  lines.push('');
+  lines.push('## Full Model Response');
+  lines.push(draft.raw);
+
+  const system = agent.prompt?.trim() || DEFAULT_AGENT_PROMPTS.reviewer;
+  const rawReview = await chatStream([
+    { role: 'system', content: system },
+    { role: 'user', content: lines.join('\n') }
+  ], agent.config, { temperature: 0 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
+
+  const parsed = parseReviewerJson(rawReview);
+  const status: 'pass' | 'fail' = parsed?.status === 'pass' ? 'pass' : 'fail';
+  const issues = normalizeIssues(parsed?.issues);
+  const feedback = typeof parsed?.feedback === 'string' ? parsed.feedback.trim() : '';
+  const normalizedRaw = rawReview.trim();
+  const finalIssues = status === 'fail'
+    ? (issues.length > 0 ? issues : ['Reviewer marked status as fail but did not provide specific issues.'])
+    : issues;
+  return {
+    status,
+    issues: finalIssues,
+    feedback: feedback || (status === 'pass' ? 'All checks passed.' : ''),
+    raw: normalizedRaw || rawReview
+  };
 }

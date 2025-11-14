@@ -140,7 +140,18 @@ const resources = {
       send: 'Send',
       waitingLLMResponse: 'Waiting for LLM response',
       waitingLLMThinking: 'Waiting for LLM thinking',
+        llmGeneratorInProgress: 'Problem generation in progress',
+        llmReviewerInProgress: 'Problem review in progress',
       llmReply: 'LLM Reply',
+        reviewerReply: 'Review response',
+        reviewerStatusLabel: 'Review status',
+        reviewerStatusPass: 'Passed',
+        reviewerStatusFail: 'Failed',
+        reviewerAttemptsLabel: 'Review rounds: {{count}}',
+        reviewerIssuesLabel: 'Issues',
+        reviewerNoIssues: 'No issues reported.',
+        reviewerForcedAcceptNotice: 'Reached the max review rounds ({{count}}); accepting the latest draft even if review still fails.',
+        reviewerForcedAcceptShort: 'forced accept',
       llmConversationHistory: 'Conversation history',
       llmConversationHistoryHint: 'Previous prompts, model replies, and saved feedback are sent to the generator to refine future results.',
       llmTurnLabel: 'Round {{index}}',
@@ -191,6 +202,8 @@ const resources = {
       , agentLatexDesc: 'Normalizes mathematical expressions into MathJax-compatible LaTeX.'
       , agentGenerator: 'Problem Generation Agent'
       , agentGeneratorDesc: 'Creates draft problems and solutions.'
+        , agentReviewer: 'Review Agent'
+        , agentReviewerDesc: 'Audits questions for clarity, unique answers, and formatting compliance.'
       , agentTranslator: 'Translation Agent'
       , agentTranslatorDesc: 'Translates questions or answers between English and Chinese.'
       , agentEditPrompt: 'Set Prompt'
@@ -210,6 +223,8 @@ const resources = {
       , defaultsDifficultyHint: 'These values populate the difficulty selector.'
       , defaultsDifficultyPromptLabel: 'Difficulty label shown in the editor'
       , defaultsOptionsCountHint: 'Applies to newly created multiple choice problems.'
+        , defaultsMaxReviewRoundsLabel: 'Max review rounds (auto QA)'
+        , defaultsMaxReviewRoundsHint: 'Number of automated audit retries after generation; after this limit the draft is accepted even if still failing.'
       , translationHelper: 'Translation assistant'
       , translationLoadQuestion: 'Load question'
       , translationLoadAnswer: 'Load answer'
@@ -361,7 +376,18 @@ const resources = {
       send: '发送',
       waitingLLMResponse: '等待 LLM 响应',
       waitingLLMThinking: '等待 LLM 思考',
+        llmGeneratorInProgress: '问题生成中',
+        llmReviewerInProgress: '问题审核中',
       llmReply: 'LLM 回复',
+        reviewerReply: '审核回复',
+        reviewerStatusLabel: '审核状态',
+        reviewerStatusPass: '已通过',
+        reviewerStatusFail: '未通过',
+        reviewerAttemptsLabel: '审核轮次：{{count}}',
+        reviewerIssuesLabel: '问题列表',
+        reviewerNoIssues: '未发现问题。',
+        reviewerForcedAcceptNotice: '已达到最大审核轮次（{{count}}），即使未通过也将直接放行当前草稿。',
+        reviewerForcedAcceptShort: '强制放行',
       llmConversationHistory: '多轮会话记录',
       llmConversationHistoryHint: '历史提问、模型回复和用户反馈会一并传递给 LLM，帮助改进下一轮生成。',
       llmTurnLabel: '第 {{index}} 轮',
@@ -412,6 +438,8 @@ const resources = {
       , agentLatexDesc: '将数学表达式标准化为适配 MathJax 的 LaTeX。'
       , agentGenerator: '题目生成代理'
       , agentGeneratorDesc: '负责生成题目与解答草稿。'
+        , agentReviewer: '审核代理'
+        , agentReviewerDesc: '对生成结果进行质检，确保描述清晰、答案唯一且格式符合规范。'
       , agentTranslator: '翻译代理'
       , agentTranslatorDesc: '用于在中英文之间转换题目或答案。'
       , agentEditPrompt: '设置提示词'
@@ -431,6 +459,8 @@ const resources = {
       , defaultsDifficultyHint: '这些值将用于难度选择。'
       , defaultsDifficultyPromptLabel: '难度标签（编辑器显示）'
       , defaultsOptionsCountHint: '影响新建选择题的默认选项数。'
+        , defaultsMaxReviewRoundsLabel: '最大审核轮次'
+        , defaultsMaxReviewRoundsHint: '每次生成后自动审核的次数，超过该次数仍未通过则直接放行。'
       , translationHelper: '翻译助手'
       , translationLoadQuestion: '载入题目文本'
       , translationLoadAnswer: '载入答案文本'
