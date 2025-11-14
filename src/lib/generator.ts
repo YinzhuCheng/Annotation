@@ -414,13 +414,13 @@ export async function generateProblemFromText(
   userLines.push('   - 1. Feedback alignment - reference each bullet from the Feedback Summary (or explicitly state that none exists) and describe how you will address it.');
   userLines.push('   - 2. Mathematical study - analyze the source problem like a teacher, noting key concepts, invariants, and solution strategies.');
   userLines.push('   - 3. Adaptation plan - explain how you will reshape the problem to fit the target question type while preserving the core mathematical idea.');
-  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
+  userLines.push('2. Produce the final version based on that plan and fill every required field (question, questionType, options, answer, subfield, academicLevel, difficulty). All narrative text and labels must be written in English even if the source materials are in other languages. If any selection is ambiguous, justify it in the analysis before choosing the closest valid value.');
   userLines.push('   - Keep questionType exactly equal to the target type.');
   userLines.push('   - Choose subfield, academicLevel, and difficulty from the allowed lists (use "Others: ..." only when nothing fits).');
   userLines.push('   - Multiple Choice: output exactly the expected number of options labeled sequentially (A, B, C, ...), with one correct option clearly reflected in the final answer.');
   userLines.push('   - Fill-in-the-blank: include exactly one blank such as "___" and provide a single definitive answer string.');
   userLines.push('   - Proof: phrase the prompt as a proof request and summarize a concise, logically ordered proof in the answer.');
-  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions.');
+  userLines.push('3. Ensure every mathematical expression you provide renders without errors in MathJax, which powers our UI preview. Prefer MathJax-supported commands and avoid syntax that requires additional packages or extensions; do not wrap math in Markdown fences.');
   userLines.push('4. Preserve LaTeX syntax using raw TeX (single backslashes) without additional escaping or Markdown fences.');
   userLines.push('5. Integrate insights from all prior rounds instead of restarting from scratch.');
   userLines.push('');
@@ -635,7 +635,8 @@ export async function reviewGeneratedQuestion(
   const guidelines: string[] = [];
   guidelines.push('1. Clarity: the question must be understandable, contain no undefined terminology, and avoid ambiguous phrasing.');
   guidelines.push('2. Multiple Choice validation: ensure options are distinct, the stated answer maps to exactly one option label, and no other option obviously shares the same truth value.');
-  guidelines.push('3. Formatting: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer).');
+  guidelines.push('3. Formatting & MathJax: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer), and every mathematical expression must be valid MathJax (no unsupported environments or Markdown fences).');
+  guidelines.push('4. Language: all narrative content, labels, and explanations must be written in English; flag any non-English words (aside from standard mathematical symbols).');
   guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
 
   const lines: string[] = [];
