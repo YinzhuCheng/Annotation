@@ -9,6 +9,7 @@ import {
   ProblemRecord,
   AgentId,
   LLMConfigState,
+  LLMAgentSettings,
 } from "../state/store";
 import {
   chatStream,
@@ -148,6 +149,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         segment.type === "text" ? segment.text : placeholder,
       )
       .join("\n\n");
+  };
+  const getAgentSettings = (id: AgentId): LLMAgentSettings => {
+    const latest = useAppStore.getState().llmAgents[id];
+    return latest || (agents as Record<AgentId, LLMAgentSettings>)[id];
   };
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
@@ -701,7 +706,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     }
     if (!ensureAgent("ocr")) return;
     setLlmStatusSource("ocr");
-    const text = await ocrWithLLM(ocrImage, agents.ocr, {
+    const ocrAgent = getAgentSettings("ocr");
+    const text = await ocrWithLLM(ocrImage, ocrAgent, {
       onStatus: (s) => setLlmStatus(s),
     });
     setOcrText(text);
@@ -789,8 +795,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       undefined,
       contextLabel,
     );
+    const latexAgent = getAgentSettings("latex");
     const corrected = (
-      await latexCorrection(payload, agents.latex, {
+      await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
       })
     ).trim();
@@ -858,10 +865,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     let workingProblem = current;
     try {
       for (let attempt = 1; attempt <= maxReviewRounds; attempt += 1) {
+        const generatorAgent = getAgentSettings("generator");
         const result = await generateProblemFromText(
           input,
           workingProblem,
-          agents.generator,
+          generatorAgent,
           defaults,
           {
             onStatus: (s) => setLlmStatus(s),
@@ -875,6 +883,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         } as ProblemRecord;
 
         setLlmStatusSource("review");
+        const reviewerAgent = getAgentSettings("reviewer");
         const review = await reviewGeneratedQuestion(
           {
             raw: result.raw,
@@ -883,7 +892,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             patch: result.patch,
             targetType: workingProblem.questionType,
           },
-          agents.reviewer,
+          reviewerAgent,
           {
             onStatus: (s) => setLlmStatus(s),
             imageAttachment: sharedImageAttachment || undefined,
@@ -1036,8 +1045,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!trimmed) return;
     if (!ensureAgent("qa")) return;
     setQaError("");
+    const qaAgent = getAgentSettings("qa");
     const contextBlock = buildQaContext();
-    const systemPrompt = agents.qa.prompt?.trim() || "";
+    const systemPrompt = qaAgent.prompt?.trim() || "";
     setQaStatus("waiting_response");
     try {
       const historyMessages: ChatMessage[] = qaConversation.map((turn) => ({
@@ -1054,7 +1064,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       ];
       const answer = await chatStream(
         messages,
-        agents.qa.config,
+        qaAgent.config,
         { temperature: 0 },
         { onStatus: (s) => setQaStatus(s) },
       );
@@ -1116,7 +1126,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         uniqueErrors ?? fallbackReport,
         "MathJax preview panel",
       );
-      const corrected = await latexCorrection(payload, agents.latex, {
+      const latexAgent = getAgentSettings("latex");
+      const corrected = await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
       });
       setLatexInput(corrected);
@@ -1141,10 +1152,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setTranslationError("");
     setTranslationStatus("waiting_response");
     try {
+      const translatorAgent = getAgentSettings("translator");
       const output = await translateWithLLM(
         payload,
         translationTarget,
-        agents.translator,
+        translatorAgent,
         { onStatus: (s) => setTranslationStatus(s) },
       );
       setTranslationOutput(output);
