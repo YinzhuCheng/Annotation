@@ -151,6 +151,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexInput, setLatexInput] = useState("");
   const [latexRenderError, setLatexRenderError] = useState("");
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
+  const [toolCollapse, setToolCollapse] = useState({
+    generator: false,
+    qa: false,
+    translation: false,
+    latex: false,
+    ocr: false,
+  });
+
+  const toggleTool = (key: keyof typeof toolCollapse) =>
+    setToolCollapse((prev) => ({ ...prev, [key]: !prev[key] }));
   const [questionMathJaxError, setQuestionMathJaxError] = useState("");
   const [answerMathJaxError, setAnswerMathJaxError] = useState("");
   const [previewMathJaxError, setPreviewMathJaxError] = useState("");
@@ -2446,6 +2456,289 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </button>
               </div>
             </div>
+            <div>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
+                {t("assistToolGenerator")}
+              </div>
+              <div className="small" style={{ color: "var(--text-muted)" }}>
+                {t("assistToolGeneratorHint")}
+              </div>
+              <div
+                className="row"
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
+              >
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("generator")}
+                >
+                  {toolCollapse.generator
+                    ? t("expandSection")
+                    : t("collapseSection")}
+                </button>
+              </div>
+              {!toolCollapse.generator && (
+                <>
+                  <div
+                    className="row"
+                    style={{
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      marginTop: 8,
+                    }}
+                  >
+                    <button className="primary" onClick={generate}>
+                      {t("assistToolGeneratorAction")}
+                    </button>
+                    {isGeneratorBusy && (
+                      <span className="small">
+                        {t("llmGeneratorInProgress")}
+                        {dotPattern}
+                      </span>
+                    )}
+                    {!isGeneratorBusy && isReviewerBusy && (
+                      <span className="small">
+                        {t("llmReviewerInProgress")}
+                        {dotPattern}
+                      </span>
+                    )}
+                  </div>
+                  {generatorPreview && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmReply")}
+                      </div>
+                      <textarea
+                        readOnly
+                        value={generatorPreview}
+                        rows={8}
+                        style={{
+                          width: "100%",
+                          fontFamily: "var(--font-mono, monospace)",
+                        }}
+                      />
+                    </div>
+                  )}
+                  {(reviewStatus !== null || reviewerPreview) && (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("reviewerReply")}
+                      </div>
+                      {reviewerPreview ? (
+                        <textarea
+                          readOnly
+                          value={reviewerPreview}
+                          rows={6}
+                          style={{
+                            width: "100%",
+                            fontFamily: "var(--font-mono, monospace)",
+                          }}
+                        />
+                      ) : null}
+                      {reviewStatus !== null && (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          <strong>{t("reviewerStatusLabel")}:</strong>{" "}
+                          {reviewStatus === "pass"
+                            ? t("reviewerStatusPass")
+                            : t("reviewerStatusFail")}
+                        </div>
+                      )}
+                      {reviewAttempts > 0 && (
+                        <div className="small">
+                          {t("reviewerAttemptsLabel", { count: reviewAttempts })}
+                        </div>
+                      )}
+                      {reviewIssues.length > 0 ? (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {t("reviewerIssuesLabel")}
+                          </div>
+                          <ul style={{ margin: "4px 0 0 16px" }}>
+                            {reviewIssues.map((issue, idx) => (
+                              <li key={idx}>{issue}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : reviewStatus === "pass" ? (
+                        <div
+                          className="small"
+                          style={{ marginTop: 4, color: "var(--text-muted)" }}
+                        >
+                          {t("reviewerNoIssues")}
+                        </div>
+                      ) : null}
+                      {forcedReviewAccept && (
+                        <div
+                          className="small"
+                          style={{ marginTop: 4, color: "#f97316" }}
+                        >
+                          {t("reviewerForcedAcceptNotice", {
+                            count: defaults.maxReviewRounds || 3,
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmConversationHistory")}
+                      </div>
+                      <div
+                        className="small"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {generatorHistory.length > 0
+                          ? t("llmConversationHistoryHint")
+                          : t("llmConversationHistoryEmpty")}
+                      </div>
+                    </div>
+                    {generatorHistory.length > 0 ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          maxHeight: 220,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {generatorHistory.map((turn, idx) => (
+                          <div
+                            key={turn.timestamp}
+                            style={{
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              padding: 8,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 6,
+                            }}
+                          >
+                            <div className="small" style={{ fontWeight: 600 }}>
+                              {t("llmTurnLabel", { index: idx + 1 })}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmPromptLabel")}:</strong>{" "}
+                              {turn.prompt || t("llmEmptyValue")}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmResponseLabel")}:</strong>{" "}
+                              {turn.response || t("llmEmptyValue")}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmUserFeedbackLabel")}:</strong>{" "}
+                              {turn.feedback || t("llmEmptyValue")}
+                            </div>
+                            {turn.review && (
+                              <div
+                                className="small"
+                                style={{ whiteSpace: "pre-wrap" }}
+                              >
+                                <strong>{t("reviewerStatusLabel")}:</strong>{" "}
+                                {turn.review.status === "pass"
+                                  ? t("reviewerStatusPass")
+                                  : t("reviewerStatusFail")}{" "}
+                                (
+                                {t("reviewerAttemptsLabel", {
+                                  count: turn.review.attempts,
+                                })}
+                                )
+                                {turn.review.forced && (
+                                  <span
+                                    style={{ color: "#f97316", marginLeft: 6 }}
+                                  >
+                                    {t("reviewerForcedAcceptShort")}
+                                  </span>
+                                )}
+                                {turn.review.issues.length > 0 && (
+                                  <ul style={{ margin: "4px 0 0 16px" }}>
+                                    {turn.review.issues.map((issue, idx) => (
+                                      <li key={idx}>{issue}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="small"
+                        style={{
+                          border: "1px dashed var(--border)",
+                          borderRadius: 8,
+                          padding: 12,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {t("llmConversationHistoryEmpty")}
+                      </div>
+                    )}
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmUserFeedbackLabel")}
+                      </div>
+                      <textarea
+                        value={latestFeedback}
+                        onChange={(e) => setLatestFeedback(e.target.value)}
+                        rows={3}
+                        placeholder={t("llmFeedbackPlaceholder")}
+                      />
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "flex-end",
+                          gap: 8,
+                          alignItems: "center",
+                          marginTop: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={handleSubmitFeedback}
+                          disabled={
+                            generatorHistory.length === 0 &&
+                            latestFeedback.trim().length === 0
+                          }
+                        >
+                          {t("llmSubmitFeedback")}
+                        </button>
+                        {feedbackSavedAt && (
+                          <span
+                            className="small"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {t("saved")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
               <div
