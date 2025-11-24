@@ -36,7 +36,7 @@ export const onRequestPost: PagesFunction = async (context) => {
         model: llm.model,
         messages,
         temperature: extra?.temperature ?? 0,
-        max_tokens: extra?.maxTokens ?? 400000,
+        max_tokens: extra?.maxTokens ?? 100000,
         stream: true
       } as any;
       const r = await fetch(url, {
