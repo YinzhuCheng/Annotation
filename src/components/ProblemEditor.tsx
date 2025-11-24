@@ -1952,522 +1952,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               </div>
               <div
                 className="row"
-                style={{
-                  gap: 8,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  marginTop: 8,
-                }}
-              >
-                <button className="primary" onClick={generate}>
-                  {t("assistToolGeneratorAction")}
-                </button>
-                {isGeneratorBusy && (
-                  <span className="small">
-                    {t("llmGeneratorInProgress")}
-                    {dotPattern}
-                  </span>
-                )}
-                {!isGeneratorBusy && isReviewerBusy && (
-                  <span className="small">
-                    {t("llmReviewerInProgress")}
-                    {dotPattern}
-                  </span>
-                )}
-              </div>
-              {generatorPreview && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("llmReply")}
-                  </div>
-                  <textarea
-                    readOnly
-                    value={generatorPreview}
-                    rows={8}
-                    style={{
-                      width: "100%",
-                      fontFamily: "var(--font-mono, monospace)",
-                    }}
-                  />
-                </div>
-              )}
-              {(reviewStatus !== null || reviewerPreview) && (
-                <div style={{ marginTop: 12 }}>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("reviewerReply")}
-                  </div>
-                  {reviewerPreview ? (
-                    <textarea
-                      readOnly
-                      value={reviewerPreview}
-                      rows={6}
-                      style={{
-                        width: "100%",
-                        fontFamily: "var(--font-mono, monospace)",
-                      }}
-                    />
-                  ) : null}
-                  {reviewStatus !== null && (
-                    <div className="small" style={{ marginTop: 4 }}>
-                      <strong>{t("reviewerStatusLabel")}:</strong>{" "}
-                      {reviewStatus === "pass"
-                        ? t("reviewerStatusPass")
-                        : t("reviewerStatusFail")}
-                    </div>
-                  )}
-                  {reviewAttempts > 0 && (
-                    <div className="small">
-                      {t("reviewerAttemptsLabel", { count: reviewAttempts })}
-                    </div>
-                  )}
-                  {reviewIssues.length > 0 ? (
-                    <div className="small" style={{ marginTop: 4 }}>
-                      <div style={{ fontWeight: 600 }}>
-                        {t("reviewerIssuesLabel")}
-                      </div>
-                      <ul style={{ margin: "4px 0 0 16px" }}>
-                        {reviewIssues.map((issue, idx) => (
-                          <li key={idx}>{issue}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : reviewStatus === "pass" ? (
-                    <div
-                      className="small"
-                      style={{ marginTop: 4, color: "var(--text-muted)" }}
-                    >
-                      {t("reviewerNoIssues")}
-                    </div>
-                  ) : null}
-                  {forcedReviewAccept && (
-                    <div
-                      className="small"
-                      style={{ marginTop: 4, color: "#f97316" }}
-                    >
-                      {t("reviewerForcedAcceptNotice", {
-                        count: defaults.maxReviewRounds || 3,
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div
-                style={{
-                  marginTop: 12,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("llmConversationHistory")}
-                  </div>
-                  <div
-                    className="small"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {generatorHistory.length > 0
-                      ? t("llmConversationHistoryHint")
-                      : t("llmConversationHistoryEmpty")}
-                  </div>
-                </div>
-                {generatorHistory.length > 0 ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 8,
-                      maxHeight: 220,
-                      overflowY: "auto",
-                    }}
-                  >
-                    {generatorHistory.map((turn, idx) => (
-                      <div
-                        key={turn.timestamp}
-                        style={{
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          padding: 8,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 6,
-                        }}
-                      >
-                        <div className="small" style={{ fontWeight: 600 }}>
-                          {t("llmTurnLabel", { index: idx + 1 })}
-                        </div>
-                        <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          <strong>{t("llmPromptLabel")}:</strong>{" "}
-                          {turn.prompt || t("llmEmptyValue")}
-                        </div>
-                        <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          <strong>{t("llmResponseLabel")}:</strong>{" "}
-                          {turn.response || t("llmEmptyValue")}
-                        </div>
-                        <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          <strong>{t("llmUserFeedbackLabel")}:</strong>{" "}
-                          {turn.feedback || t("llmEmptyValue")}
-                        </div>
-                        {turn.review && (
-                          <div
-                            className="small"
-                            style={{ whiteSpace: "pre-wrap" }}
-                          >
-                            <strong>{t("reviewerStatusLabel")}:</strong>{" "}
-                            {turn.review.status === "pass"
-                              ? t("reviewerStatusPass")
-                              : t("reviewerStatusFail")}{" "}
-                            (
-                            {t("reviewerAttemptsLabel", {
-                              count: turn.review.attempts,
-                            })}
-                            )
-                            {turn.review.forced && (
-                              <span style={{ color: "#f97316", marginLeft: 6 }}>
-                                {t("reviewerForcedAcceptShort")}
-                              </span>
-                            )}
-                            {turn.review.issues.length > 0 && (
-                              <ul style={{ margin: "4px 0 0 16px" }}>
-                                {turn.review.issues.map((issue, idx) => (
-                                  <li key={idx}>{issue}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div
-                    className="small"
-                    style={{
-                      border: "1px dashed var(--border)",
-                      borderRadius: 8,
-                      padding: 12,
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    {t("llmConversationHistoryEmpty")}
-                  </div>
-                )}
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("llmUserFeedbackLabel")}
-                  </div>
-                  <textarea
-                    value={latestFeedback}
-                    onChange={(e) => setLatestFeedback(e.target.value)}
-                    rows={3}
-                    placeholder={t("llmFeedbackPlaceholder")}
-                  />
-                  <div
-                    className="row"
-                    style={{
-                      justifyContent: "flex-end",
-                      gap: 8,
-                      alignItems: "center",
-                      marginTop: 6,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={handleSubmitFeedback}
-                      disabled={
-                        generatorHistory.length === 0 &&
-                        latestFeedback.trim().length === 0
-                      }
-                    >
-                      {t("llmSubmitFeedback")}
-                    </button>
-                    {feedbackSavedAt && (
-                      <span
-                        className="small"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        {t("saved")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <hr className="div" style={{ margin: "12px 0" }} />
-            <div
-              style={{
-                marginTop: 12,
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  flexWrap: "wrap",
-                  gap: 8,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div
-                    className="label"
-                    style={{
-                      marginBottom: 4,
-                      fontSize: "1.05rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {t("qaAssistantTitle")}
-                  </div>
-                  <div
-                    className="small"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {t("qaAssistantHint")}
-                  </div>
-                </div>
-                <div
-                  className="row"
-                  style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}
-                >
-                  <button
-                    type="button"
-                    onClick={clearQaConversation}
-                    disabled={
-                      qaConversation.length === 0 && qaInput.trim().length === 0
-                    }
-                  >
-                    {t("qaAssistantClear")}
-                  </button>
-                </div>
-              </div>
-              {qaStatus !== "idle" && qaStatus !== "done" && (
-                <span
-                  className="small"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {qaStatus === "waiting_response"
-                    ? t("waitingLLMResponse")
-                    : t("waitingLLMThinking")}
-                  {dotPattern}
-                </span>
-              )}
-              {qaConversation.length > 0 ? (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                    maxHeight: 220,
-                    overflowY: "auto",
-                  }}
-                >
-                  {qaConversation.map((turn) => (
-                    <div
-                      key={turn.timestamp}
-                      style={{
-                        border: "1px solid var(--border)",
-                        borderRadius: 8,
-                        padding: 8,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <div className="small" style={{ fontWeight: 600 }}>
-                        {turn.role === "user"
-                          ? t("qaAssistantUserLabel")
-                          : t("qaAssistantAgentLabel")}
-                      </div>
-                      <div
-                        className="small"
-                        style={{ whiteSpace: "pre-wrap" }}
-                      >
-                        {turn.content}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div
-                  className="small"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {t("qaAssistantEmpty")}
-                </div>
-              )}
-              {qaError && (
-                <span className="small" style={{ color: "#f87171" }}>
-                  {t("qaAssistantError", { message: qaError })}
-                </span>
-              )}
-              <textarea
-                value={qaInput}
-                onChange={(e) => setQaInput(e.target.value)}
-                rows={3}
-                placeholder={t("qaAssistantInputPlaceholder")}
-              />
-              <div
-                className="row"
-                style={{
-                  justifyContent: "flex-end",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={askQaAssistant}
-                  disabled={
-                    qaInput.trim().length === 0 ||
-                    qaStatus === "waiting_response" ||
-                    qaStatus === "thinking" ||
-                    qaStatus === "responding"
-                  }
-                >
-                  {t("qaAssistantSend")}
-                </button>
-              </div>
-            </div>
-            <hr className="div" style={{ margin: "12px 0" }} />
-            <div>
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: 8,
-                }}
-              >
-                <div
-                  className="label"
-                  style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}
-                >
-                  {t("assistToolTranslation")}
-                </div>
-                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => loadTranslationFrom("question")}
-                  >
-                    {t("translationLoadQuestion")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadTranslationFrom("answer")}
-                  >
-                    {t("translationLoadAnswer")}
-                  </button>
-                  <select
-                    value={translationTarget}
-                    onChange={(e) =>
-                      setTranslationTarget(e.target.value as "en" | "zh")
-                    }
-                  >
-                    <option value="zh">{t("translationTargetZh")}</option>
-                    <option value="en">{t("translationTargetEn")}</option>
-                  </select>
-                  <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={runTranslation}
-                    >
-                      {t("translationRun")}
-                    </button>
-                    {translationStatus !== "idle" &&
-                      translationStatus !== "done" && (
-                        <span className="small">
-                          {translationStatus === "waiting_response"
-                            ? t("waitingLLMResponse")
-                            : t("waitingLLMThinking")}
-                          {dotPattern}
-                        </span>
-                      )}
-                  </div>
-                </div>
-              </div>
-              {translationError && (
-                <span className="small" style={{ color: "#f87171" }}>
-                  {translationError}
-                </span>
-              )}
-              <div
-                className="grid"
-                style={{ gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}
-              >
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("translationInputLabel")}
-                  </div>
-                  <textarea
-                    value={translationInput}
-                    onChange={(e) => setTranslationInput(e.target.value)}
-                    rows={6}
-                  />
-                </div>
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("translationOutputLabel")}
-                  </div>
-                  <textarea
-                    value={translationOutput}
-                    onChange={(e) => setTranslationOutput(e.target.value)}
-                    rows={6}
-                  />
-                </div>
-              </div>
-              <div
-                className="row"
-                style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    translationOutput && update({ question: translationOutput })
-                  }
-                >
-                  {t("translationApplyQuestion")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    translationOutput && update({ answer: translationOutput })
-                  }
-                >
-                  {t("translationApplyAnswer")}
-                </button>
-              </div>
-            </div>
-            <div>
-              <div
-                className="label"
-                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
-              >
-                {t("assistToolGenerator")}
-              </div>
-              <div className="small" style={{ color: "var(--text-muted)" }}>
-                {t("assistToolGeneratorHint")}
-              </div>
-              <div
-                className="row"
                 style={{ justifyContent: "flex-end", marginTop: 4 }}
               >
                 <button
@@ -2541,7 +2025,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                       ) : null}
                       {reviewStatus !== null && (
                         <div className="small" style={{ marginTop: 4 }}>
-                          <strong>{t("reviewerStatusLabel")}:</strong>{" "}
+                          <strong>{t("reviewerStatusLabel")}:</strong>{' '}
                           {reviewStatus === "pass"
                             ? t("reviewerStatusPass")
                             : t("reviewerStatusFail")}
@@ -2633,21 +2117,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                               className="small"
                               style={{ whiteSpace: "pre-wrap" }}
                             >
-                              <strong>{t("llmPromptLabel")}:</strong>{" "}
+                              <strong>{t("llmPromptLabel")}:</strong>{' '}
                               {turn.prompt || t("llmEmptyValue")}
                             </div>
                             <div
                               className="small"
                               style={{ whiteSpace: "pre-wrap" }}
                             >
-                              <strong>{t("llmResponseLabel")}:</strong>{" "}
+                              <strong>{t("llmResponseLabel")}:</strong>{' '}
                               {turn.response || t("llmEmptyValue")}
                             </div>
                             <div
                               className="small"
                               style={{ whiteSpace: "pre-wrap" }}
                             >
-                              <strong>{t("llmUserFeedbackLabel")}:</strong>{" "}
+                              <strong>{t("llmUserFeedbackLabel")}:</strong>{' '}
                               {turn.feedback || t("llmEmptyValue")}
                             </div>
                             {turn.review && (
@@ -2655,15 +2139,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                                 className="small"
                                 style={{ whiteSpace: "pre-wrap" }}
                               >
-                                <strong>{t("reviewerStatusLabel")}:</strong>{" "}
+                                <strong>{t("reviewerStatusLabel")}:</strong>{' '}
                                 {turn.review.status === "pass"
                                   ? t("reviewerStatusPass")
-                                  : t("reviewerStatusFail")}{" "}
-                                (
+                                  : t("reviewerStatusFail")} {'('}
                                 {t("reviewerAttemptsLabel", {
                                   count: turn.review.attempts,
                                 })}
-                                )
+                                {')'}
                                 {turn.review.forced && (
                                   <span
                                     style={{ color: "#f97316", marginLeft: 6 }}
@@ -2739,6 +2222,296 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   </div>
                 </>
               )}
+            </div>
+            <hr className="div" style={{ margin: "12px 0" }} />
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div
+                    className="label"
+                    style={{
+                      marginBottom: 4,
+                      fontSize: "1.05rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {t("qaAssistantTitle")}
+                  </div>
+                  <div
+                    className="small"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {t("qaAssistantHint")}
+                  </div>
+                </div>
+                <div
+                  className="row"
+                  style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}
+                >
+                  <button
+                    type="button"
+                    onClick={clearQaConversation}
+                    disabled={
+                      qaConversation.length === 0 && qaInput.trim().length === 0
+                    }
+                  >
+                    {t("qaAssistantClear")}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleTool("qa")}
+                  >
+                    {toolCollapse.qa ? t("expandSection") : t("collapseSection")}
+                  </button>
+                </div>
+              </div>
+              {!toolCollapse.qa && (
+                <>
+                  {qaStatus !== "idle" && qaStatus !== "done" && (
+                    <span
+                      className="small"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {qaStatus === "waiting_response"
+                        ? t("waitingLLMResponse")
+                        : t("waitingLLMThinking")}
+                      {dotPattern}
+                    </span>
+                  )}
+                  {qaConversation.length > 0 ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        maxHeight: 220,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {qaConversation.map((turn) => (
+                        <div
+                          key={turn.timestamp}
+                          style={{
+                            border: "1px solid var(--border)",
+                            borderRadius: 8,
+                            padding: 8,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <div className="small" style={{ fontWeight: 600 }}>
+                            {turn.role === "user"
+                              ? t("qaAssistantUserLabel")
+                              : t("qaAssistantAgentLabel")}
+                          </div>
+                          <div
+                            className="small"
+                            style={{ whiteSpace: "pre-wrap" }}
+                          >
+                            {turn.content}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      className="small"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {t("qaAssistantEmpty")}
+                    </div>
+                  )}
+                  {qaError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {t("qaAssistantError", { message: qaError })}
+                    </span>
+                  )}
+                  <textarea
+                    value={qaInput}
+                    onChange={(e) => setQaInput(e.target.value)}
+                    rows={3}
+                    placeholder={t("qaAssistantInputPlaceholder")}
+                  />
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={askQaAssistant}
+                      disabled={
+                        qaInput.trim().length === 0 ||
+                        qaStatus === "waiting_response" ||
+                        qaStatus === "thinking" ||
+                        qaStatus === "responding"
+                      }
+                    >
+                      {t("qaAssistantSend")}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <hr className="div" style={{ margin: "12px 0" }} />
+            <div>
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <div
+                  className="label"
+                  style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}
+                >
+                  {t("assistToolTranslation")}
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("translation")}
+                >
+                  {toolCollapse.translation
+                    ? t("expandSection")
+                    : t("collapseSection")}
+                </button>
+              </div>
+              {!toolCollapse.translation && (
+                <>
+                  <div
+                    className="row"
+                    style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => loadTranslationFrom("question")}
+                    >
+                      {t("translationLoadQuestion")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => loadTranslationFrom("answer")}
+                    >
+                      {t("translationLoadAnswer")}
+                    </button>
+                    <select
+                      value={translationTarget}
+                      onChange={(e) =>
+                        setTranslationTarget(e.target.value as "en" | "zh")
+                      }
+                    >
+                      <option value="zh">{t("translationTargetZh")}</option>
+                      <option value="en">{t("translationTargetEn")}</option>
+                    </select>
+                  </div>
+                  {translationError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {translationError}
+                    </span>
+                  )}
+                  <div
+                    className="grid"
+                    style={{
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("translationInputLabel")}
+                      </div>
+                      <textarea
+                        value={translationInput}
+                        onChange={(e) => setTranslationInput(e.target.value)}
+                        rows={6}
+                      />
+                    </div>
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("translationOutputLabel")}
+                      </div>
+                      <textarea
+                        value={translationOutput}
+                        onChange={(e) => setTranslationOutput(e.target.value)}
+                        rows={6}
+                      />
+                    </div>
+                  </div>
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      marginTop: 8,
+                    }}
+                  >
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={runTranslation}
+                      >
+                        {t("translationRun")}
+                      </button>
+                      {translationStatus !== "idle" &&
+                        translationStatus !== "done" && (
+                          <span className="small">
+                            {translationStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        translationOutput &&
+                        update({ question: translationOutput })
+                      }
+                    >
+                      {t("translationApplyQuestion")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        translationOutput && update({ answer: translationOutput })
+                      }
+                    >
+                      {t("translationApplyAnswer")}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
               <div
@@ -2752,96 +2525,114 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               </div>
               <div
                 className="row"
-                style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
               >
-                <button type="button" onClick={() => loadLatexFrom("question")}>
-                  {t("assistToolLatexLoadQuestion")}
-                </button>
-                <button type="button" onClick={() => loadLatexFrom("answer")}>
-                  {t("assistToolLatexLoadAnswer")}
-                </button>
                 <button
                   type="button"
-                  onClick={clearLatexInput}
-                  disabled={!latexHasSource}
+                  className="ghost"
+                  onClick={() => toggleTool("latex")}
                 >
-                  {t("assistToolLatexClear")}
+                  {toolCollapse.latex
+                    ? t("expandSection")
+                    : t("collapseSection")}
                 </button>
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={fixLatexPreview}
-                    disabled={!latexHasSource}
+              </div>
+              {!toolCollapse.latex && (
+                <>
+                  <div
+                    className="row"
+                    style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
                   >
-                    {t("assistToolLatexFix")}
-                  </button>
-                  {llmStatusSource === "latex_preview" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
+                    <button type="button" onClick={() => loadLatexFrom("question")}>
+                      {t("assistToolLatexLoadQuestion")}
+                    </button>
+                    <button type="button" onClick={() => loadLatexFrom("answer")}>
+                      {t("assistToolLatexLoadAnswer")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearLatexInput}
+                      disabled={!latexHasSource}
+                    >
+                      {t("assistToolLatexClear")}
+                    </button>
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={fixLatexPreview}
+                        disabled={!latexHasSource}
+                      >
+                        {t("assistToolLatexFix")}
+                      </button>
+                      {llmStatusSource === "latex_preview" &&
+                        llmStatus !== "idle" &&
+                        llmStatus !== "done" && (
+                          <span className="small">
+                            {llmStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                  </div>
+                  <textarea
+                    value={latexInput}
+                    onChange={(e) => setLatexInput(e.target.value)}
+                    rows={6}
+                    placeholder={t("assistToolLatexPlaceholder")}
+                    style={{
+                      marginTop: 8,
+                      fontFamily: "var(--font-mono, monospace)",
+                    }}
+                  />
+                  {latexRenderError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {t("assistToolLatexRenderError", { error: latexRenderError })}
+                    </span>
+                  )}
+                  {latexErrors.length > 0 && (
+                    <div className="small" style={{ marginTop: 8 }}>
+                      <div style={{ fontWeight: 600 }}>
+                        {t("assistToolLatexErrorsTitle")}
+                      </div>
+                      <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+                        {latexErrors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {latexHasSource &&
+                    !latexRenderError &&
+                    latexErrors.length === 0 && (
+                      <span
+                        className="small"
+                        style={{
+                          color: "var(--text-muted)",
+                          display: "block",
+                          marginTop: 8,
+                        }}
+                      >
+                        {t("assistToolLatexNoIssues")}
                       </span>
                     )}
-                </div>
-              </div>
-              <textarea
-                value={latexInput}
-                onChange={(e) => setLatexInput(e.target.value)}
-                rows={6}
-                placeholder={t("assistToolLatexPlaceholder")}
-                style={{
-                  marginTop: 8,
-                  fontFamily: "var(--font-mono, monospace)",
-                }}
-              />
-              {latexRenderError && (
-                <span className="small" style={{ color: "#f87171" }}>
-                  {t("assistToolLatexRenderError", { error: latexRenderError })}
-                </span>
-              )}
-              {latexErrors.length > 0 && (
-                <div className="small" style={{ marginTop: 8 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {t("assistToolLatexErrorsTitle")}
-                  </div>
-                  <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
-                    {latexErrors.map((err, idx) => (
-                      <li key={idx}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {latexHasSource &&
-                !latexRenderError &&
-                latexErrors.length === 0 && (
-                  <span
-                    className="small"
-                    style={{
-                      color: "var(--text-muted)",
-                      display: "block",
-                      marginTop: 8,
-                    }}
-                  >
-                    {t("assistToolLatexNoIssues")}
-                  </span>
-                )}
-              {latexHasSource && (
-                <div
-                  ref={latexPreviewRef}
-                  style={{
-                    marginTop: 8,
-                    padding: 12,
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    background: "var(--surface-subtle)",
-                    minHeight: 48,
-                    whiteSpace: "pre-wrap",
-                  }}
-                />
+                  {latexHasSource && (
+                    <div
+                      ref={latexPreviewRef}
+                      style={{
+                        marginTop: 8,
+                        padding: 12,
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        background: "var(--surface-subtle)",
+                        minHeight: 48,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    />
+                  )}
+                </>
               )}
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
@@ -2856,145 +2647,160 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 {t("uploadImage")}
               </div>
               <div
-                className="dropzone"
-                tabIndex={0}
-                role="button"
-                onDrop={handleOcrDrop}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }}
-                onPaste={handleOcrPaste}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setOcrPasteActive(true);
-                  setOcrContextMenu({ x: e.clientX, y: e.clientY });
-                }}
-                onMouseEnter={() => setOcrPasteActive(true)}
-                onMouseLeave={() => setOcrPasteActive(false)}
-                onFocus={() => setOcrPasteActive(true)}
-                onFocusCapture={() => setOcrPasteActive(true)}
-                onBlur={() => setOcrPasteActive(false)}
-                onBlurCapture={() => setOcrPasteActive(false)}
+                className="row"
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
               >
-                <div
-                  className="row"
-                  style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("ocr")}
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    ref={ocrFileInputRef}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) await onAddOcrImage(file);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button onClick={() => ocrFileInputRef.current?.click()}>
-                    {t("browse")}
-                  </button>
-                </div>
-                <div
-                  className="row"
-                  style={{
-                    justifyContent: "center",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginTop: 8,
-                  }}
-                >
-                  <span className="small">{t("dragDropOrPaste")}</span>
-                  <span className="small">{t("rightClickForPaste")}</span>
-                  {ocrDisplayName && (
-                    <span className="small">
-                      {t("generatedNameLabel")}: {ocrDisplayName}
-                    </span>
-                  )}
-                </div>
+                  {toolCollapse.ocr ? t("expandSection") : t("collapseSection")}
+                </button>
               </div>
-              {ocrContextMenu && (
-                <div
-                  style={{
-                    position: "fixed",
-                    top: ocrContextMenu.y,
-                    left: ocrContextMenu.x,
-                    zIndex: 9999,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.18)",
-                    padding: 8,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <button
-                    onClick={async (event) => {
-                      event.stopPropagation();
-                      try {
-                        const files = await readClipboardFiles((mime) =>
-                          mime.startsWith("image/"),
-                        );
-                        if (!files.length) {
-                          alert(t("noFilesFromClipboard"));
-                        } else {
-                          await onAddOcrImage(files[0]);
-                        }
-                      } catch (error) {
-                        handleOcrClipboardError(error);
-                      } finally {
-                        setOcrContextMenu(null);
-                      }
+              {!toolCollapse.ocr && (
+                <>
+                  <div
+                    className="dropzone"
+                    tabIndex={0}
+                    role="button"
+                    onDrop={handleOcrDrop}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
                     }}
+                    onPaste={handleOcrPaste}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setOcrPasteActive(true);
+                      setOcrContextMenu({ x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseEnter={() => setOcrPasteActive(true)}
+                    onMouseLeave={() => setOcrPasteActive(false)}
+                    onFocus={() => setOcrPasteActive(true)}
+                    onFocusCapture={() => setOcrPasteActive(true)}
+                    onBlur={() => setOcrPasteActive(false)}
+                    onBlurCapture={() => setOcrPasteActive(false)}
                   >
-                    {t("pasteFromClipboard")}
-                  </button>
-                </div>
-              )}
-              {ocrPreviewUrl && (
-                <div style={{ marginTop: 8 }}>
+                    <div
+                      className="row"
+                      style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        ref={ocrFileInputRef}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) await onAddOcrImage(file);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button onClick={() => ocrFileInputRef.current?.click()}>
+                        {t("browse")}
+                      </button>
+                    </div>
+                    <div
+                      className="row"
+                      style={{
+                        justifyContent: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 8,
+                      }}
+                    >
+                      <span className="small">{t("dragDropOrPaste")}</span>
+                      <span className="small">{t("rightClickForPaste")}</span>
+                      {ocrDisplayName && (
+                        <span className="small">
+                          {t("generatedNameLabel")}: {ocrDisplayName}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {ocrContextMenu && (
+                    <div
+                      style={{
+                        position: "fixed",
+                        top: ocrContextMenu.y,
+                        left: ocrContextMenu.x,
+                        zIndex: 9999,
+                        background: "var(--surface)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        boxShadow: "0 10px 24px rgba(15, 23, 42, 0.18)",
+                        padding: 8,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          try {
+                            const files = await readClipboardFiles((mime) =>
+                              mime.startsWith("image/"),
+                            );
+                            if (!files.length) {
+                              alert(t("noFilesFromClipboard"));
+                            } else {
+                              await onAddOcrImage(files[0]);
+                            }
+                          } catch (error) {
+                            handleOcrClipboardError(error);
+                          } finally {
+                            setOcrContextMenu(null);
+                          }
+                        }}
+                      >
+                        {t("pasteFromClipboard")}
+                      </button>
+                    </div>
+                  )}
+                  {ocrPreviewUrl && (
+                    <div style={{ marginTop: 8 }}>
+                      <div
+                        className="row"
+                        style={{ justifyContent: "flex-end", marginBottom: 6 }}
+                      >
+                        <button onClick={() => openViewer(ocrPreviewUrl)}>
+                          {t("viewLarge")}
+                        </button>
+                      </div>
+                      <img className="preview" src={ocrPreviewUrl} />
+                    </div>
+                  )}
                   <div
                     className="row"
-                    style={{ justifyContent: "flex-end", marginBottom: 6 }}
+                    style={{ marginTop: 8, gap: 8, alignItems: "center" }}
                   >
-                    <button onClick={() => openViewer(ocrPreviewUrl)}>
-                      {t("viewLarge")}
-                    </button>
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button onClick={runOCR}>{t("ocrExtract")}</button>
+                      {llmStatusSource === "ocr" &&
+                        llmStatus !== "idle" &&
+                        llmStatus !== "done" && (
+                          <span className="small">
+                            {llmStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                    <button onClick={applyOcrText}>{t("confirmText")}</button>
                   </div>
-                  <img className="preview" src={ocrPreviewUrl} />
-                </div>
-              )}
-
-              <div
-                className="row"
-                style={{ marginTop: 8, gap: 8, alignItems: "center" }}
-              >
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button onClick={runOCR}>{t("ocrExtract")}</button>
-                  {llmStatusSource === "ocr" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
-                </div>
-                <button onClick={applyOcrText}>{t("confirmText")}</button>
-              </div>
-              {ocrText && (
-                <textarea
-                  style={{ marginTop: 8 }}
-                  value={ocrText}
-                  onChange={(e) => setOcrText(e.target.value)}
-                />
+                  {ocrText && (
+                    <textarea
+                      style={{ marginTop: 8 }}
+                      value={ocrText}
+                      onChange={(e) => setOcrText(e.target.value)}
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>
