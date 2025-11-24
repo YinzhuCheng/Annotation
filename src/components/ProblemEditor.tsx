@@ -437,7 +437,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [current.question]);
+  }, [current.question, showPreview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -482,6 +482,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     current.options,
     current.questionType,
     defaults.optionsCount,
+    showPreview,
   ]);
 
   useEffect(() => {
@@ -530,7 +531,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [latexInput]);
+  }, [latexInput, showPreview]);
 
   const isQaBusy = qaStatus !== "idle" && qaStatus !== "done";
 
@@ -721,25 +722,42 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       const raw = localStorage.getItem("llm-overall-draft");
       if (!raw) return false;
       const parsed = JSON.parse(raw) as Partial<LLMConfigState>;
-      const apiKey = parsed.apiKey?.trim();
-      const model = parsed.model?.trim();
-      const baseUrl = parsed.baseUrl?.trim();
-      const provider = (parsed.provider as LLMConfigState["provider"]) || "openai";
+      const apiKey = parsed.apiKey?.trim() || "";
+      const model = parsed.model?.trim() || "";
+      const baseUrl = parsed.baseUrl?.trim() || "";
+      const provider: LLMConfigState["provider"] =
+        parsed.provider === "gemini"
+          ? "gemini"
+          : parsed.provider === "claude"
+            ? "claude"
+            : "openai";
       if (!apiKey || !model || !baseUrl) return false;
       const storeState = useAppStore.getState();
+      let applied = false;
       ALL_AGENT_IDS.forEach((id) => {
         const currentAgent = storeState.llmAgents[id];
-        storeState.saveAgentSettings(id, {
-          ...currentAgent,
-          config: {
-            provider,
-            apiKey,
-            model,
-            baseUrl,
-          },
-        });
+        const nextConfig: LLMConfigState = {
+          provider,
+          apiKey,
+          model,
+          baseUrl,
+        };
+        const currentConfig = currentAgent?.config;
+        const differs =
+          !currentConfig ||
+          currentConfig.provider !== nextConfig.provider ||
+          currentConfig.apiKey !== nextConfig.apiKey ||
+          currentConfig.model !== nextConfig.model ||
+          currentConfig.baseUrl !== nextConfig.baseUrl;
+        if (differs) {
+          storeState.saveAgentSettings(id, {
+            ...currentAgent,
+            config: nextConfig,
+          });
+          applied = true;
+        }
       });
-      return true;
+      return applied;
     } catch (err) {
       console.warn("Failed to auto-apply overall LLM config", err);
       return false;
@@ -747,11 +765,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const ensureAgent = (agentId: AgentId): boolean => {
-    if (hasValidConfig(agents[agentId]?.config)) return true;
-    if (autoApplyOverallConfig()) {
-      const refreshed = useAppStore.getState().llmAgents[agentId]?.config;
-      if (hasValidConfig(refreshed)) return true;
-    }
+    autoApplyOverallConfig();
+    const refreshedConfig = useAppStore.getState().llmAgents[agentId]?.config;
+    if (hasValidConfig(refreshedConfig)) return true;
     alert(
       `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
     );
