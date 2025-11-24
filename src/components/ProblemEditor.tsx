@@ -103,7 +103,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     | "latex_preview"
     | "ocr"
   >(null);
-  const DOT_SEQUENCE = [".", " ..", " ..."] as const;
+  const DOT_SEQUENCE = [" .", " ..", " ..."] as const;
   const [dotStep, setDotStep] = useState(0);
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
