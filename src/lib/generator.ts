@@ -95,6 +95,47 @@ const cleanOptionText = (fragment: string): string | null => {
   return text;
 };
 
+const parseOptionsBlock = (block: string): string[] => {
+  const lines = block.split(/\n/);
+  const labelRegex = /^([A-Z])[)\.\-:]\s*(.*)$/;
+  const results: string[] = [];
+  let currentLines: string[] = [];
+  const flush = () => {
+    if (currentLines.length === 0) return;
+    const joined = currentLines.join('\n').trim();
+    if (joined.length > 0) {
+      results.push(joined);
+    }
+    currentLines = [];
+  };
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      if (currentLines.length > 0) {
+        currentLines.push('');
+      }
+      continue;
+    }
+    const labelMatch = trimmed.match(labelRegex);
+    if (labelMatch) {
+      flush();
+      const body = labelMatch[2]?.trim() ?? '';
+      currentLines = body ? [body] : [];
+      if (!body) {
+        currentLines = [];
+      }
+      continue;
+    }
+    if (currentLines.length === 0) {
+      currentLines = [trimmed];
+    } else {
+      currentLines.push(trimmed);
+    }
+  }
+  flush();
+  return results;
+};
+
 const addOptionFragment = (fragment: string, target: string[]) => {
   if (!fragment) return;
   let text = fragment.trim();
@@ -267,8 +308,13 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   } else if (optionsSection.length > 0) {
     const block = optionsSection.join('\n').replace(/\r/g, '').trim();
     if (block && !/^\(none\)$/i.test(block)) {
-      const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
-      segments.forEach((segment) => addOptionFragment(segment, options));
+      const parsedByLine = parseOptionsBlock(block);
+      if (parsedByLine.length > 0) {
+        parsedByLine.forEach((segment) => options.push(segment));
+      } else {
+        const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
+        segments.forEach((segment) => addOptionFragment(segment, options));
+      }
       if (options.length === 0) {
         parseOptionValue(block, options);
       }
@@ -455,7 +501,7 @@ export async function generateProblemFromText(
   userLines.push('');
 
   userLines.push('## Output Contract');
-  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
+  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content. In the Options section, list each choice on its own line starting with its label (e.g., "A) ...").');
   const outputTemplateLines: string[] = [];
   outputTemplateLines.push('<Thinking>{{');
   outputTemplateLines.push('Analysis:');
@@ -476,7 +522,7 @@ export async function generateProblemFromText(
   if (targetType === 'Multiple Choice') {
     outputTemplateLines.push('Options:');
     optionLabels.forEach((label) => {
-      outputTemplateLines.push(`${label}) <option text in English>`);
+      outputTemplateLines.push(`${label}) <option text in English on its own line>`);
     });
   } else {
     outputTemplateLines.push('Options: (none)');
@@ -695,6 +741,7 @@ export async function reviewGeneratedQuestion(
   const guidelines: string[] = [];
   guidelines.push('1. Problem coherence: the prompt must be internally consistent, define or reference every concept it uses, avoid contradictory statements, and omit redundant or impossible conditions.');
   guidelines.push('2. Answer correctness: the stated answer must be correct and uniquely determined by the question. For Multiple Choice, exactly one option must be correct and the Answer line must reference that option; for Fill-in-the-blank, the answer must satisfy the condition implied by the blank; for Proof, the reasoning must logically establish the claim.');
+  guidelines.push('3. Option clarity (Multiple Choice only): each option must stay on its own labeled line (e.g., "A) ..."). Flag cases where labels are missing/duplicated or option text merges into surrounding math so that choices cannot be clearly distinguished.');
   guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
 
   const lines: string[] = [];
