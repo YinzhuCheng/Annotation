@@ -14,9 +14,15 @@
       .muted { color: var(--muted); font-size: 12px; }
       h1, h2, h3, h4, h5 { margin: 8px 0; }
       ul { margin: 8px 0 0 16px; }
-      a.btn { display:inline-block; padding:8px 12px; background: var(--accent); color:#fff; text-decoration:none; border-radius:8px; }
+      a.btn, button.btn { display:inline-block; padding:8px 12px; background: var(--accent); color:#fff; text-decoration:none; border-radius:8px; border:none; cursor:pointer; }
       .ghost { background: transparent; color: var(--fg); border:1px solid var(--border); }
       .space { height: 16px; }
+      .pages { position: relative; }
+      .page { display: none; }
+      .page.active { display: block; animation: fade 200ms ease-in; }
+      .nav { margin-top: 16px; }
+      .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border:1px solid var(--border); color: var(--muted); }
+      @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       @media (prefers-color-scheme: light) {
         :root { --bg:#f8fafc; --fg:#0f172a; --muted:#334155; --border:#cbd5e1; --accent:#4f46e5; }
         .card { background: #fff; }
@@ -32,107 +38,200 @@
         </div>
       </div>
       <div class="space"></div>
-      <div class="card">
-        <h3 style="margin:0">English</h3>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">Workflow Overview</h4>
-          <ul>
-            <li>Start in <strong>LLM Configuration</strong> and enter provider, base URL, model, and API key for every agent. The “Overall settings” section applies the same credentials to all four agents at once.</li>
-            <li>Capture raw material by importing spreadsheets, pasting text, or uploading screenshots for OCR. You can mix-and-match these approaches for a single problem.</li>
-            <li>Switch to the problem editor to refine wording, pick subfields, and record metadata such as academic level and difficulty.</li>
-            <li>Use the LLM assist tools to rephrase the question for the chosen type, translate content, or deliver MathJax-friendly LaTeX. Review the generated draft before saving.</li>
-            <li>When a batch is complete, export structured data (JSON/XLSX) and any composed images to archive your work.</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">Problem Editor Quick Reference</h4>
-          <ul>
-            <li><strong>Required fields</strong> are marked with an asterisk. Saving or navigating will warn you about unfinished items but still allow you to proceed if you acknowledge the prompt.</li>
-            <li><strong>Fill-in-the-blank questions</strong> should contain visible blanks ("___"). If the source text uses undefined notions, add a short definition so the question is self-contained.</li>
-            <li><strong>Multiple choice questions</strong> automatically match the default option count. Adjust the count under Defaults if you need a different number for newly created items.</li>
-            <li><strong>Subfields</strong> accept multiple selections; click the × badge to remove one. Custom entries are appended to the joined “result” preview.</li>
-            <li><strong>Images</strong> live inside browser storage. Use “View large” to double-check resolution before exporting.</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">LLM Assistants</h4>
-          <ul>
-            <li><strong>Generate</strong> rewrites the current draft so it matches the selected problem type, fills blanks, and proposes structured metadata. It keeps your edits when possible—rerun after major changes.</li>
-            <li><strong>Translation assistant</strong> can pull text from the question or answer area, translate it, and write the translated copy back on demand.</li>
-            <li><strong>LaTeX correction</strong> walks through question or answer text, standardises symbols such as \(\alpha\), \(\mathbb{Z}\), or matrix layouts, and ensures MathJax renders them without errors.</li>
-            <li><strong>OCR helper</strong> accepts screenshots, performs recognition via the OCR agent, and lets you paste recognised text directly into the editor.</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">Import, Export, and Versioning</h4>
-          <ul>
-            <li>Use <strong>Import XLSX</strong> to bring in existing datasets. Columns map automatically to internal fields; review the preview to confirm alignment.</li>
-            <li><strong>Export Datasets</strong> produces a JSON bundle with the current question bank, while <strong>Export XLSX</strong> gives you a spreadsheet snapshot suitable for manual review.</li>
-            <li><strong>Export Images</strong> bundles composed canvases and image blocks. Run this before clearing storage or moving to a different machine.</li>
-            <li>Every change is stored in your browser. Back up frequently by exporting, especially before clearing the bank or resetting defaults.</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">Troubleshooting</h4>
-          <ul>
-            <li>If an agent warns about missing credentials, revisit LLM Configuration and ensure provider, base URL, model, and API key are populated.</li>
-            <li>Stale completions? Click “Detailed settings” to edit prompts per agent, or use “Copy config from…” to reuse a working configuration.</li>
-            <li>When the generator output is off-topic, provide clearer source text, adjust the question type, and rerun with the updated context.</li>
-            <li>Browser storage limits vary. Use the storage indicator on the home screen to gauge remaining quota.</li>
-          </ul>
-        </div>
+      <div class="pages">
+        <section class="page active" data-page="0">
+          <div class="card">
+            <div class="row" style="align-items:flex-start">
+              <div style="flex:1; min-width: 280px">
+                <h3 style="margin:0">Workflow Overview</h3>
+                <p class="muted" style="margin:4px 0 12px 0">From configuration to export, step-by-step.</p>
+                <div class="card" style="margin-top:0">
+                  <h4 style="margin-top:0">1. Configure Agents</h4>
+                  <ul>
+                    <li>Open <strong>LLM Configuration</strong>, fill provider / base URL / model / key once in “Overall settings”, then fine-tune prompts per agent if needed.</li>
+                    <li>Each agent (Generator / Reviewer / Translator / OCR / QA) can use different models—verify before starting a session.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">2. Collect & Edit</h4>
+                  <ul>
+                    <li>Import spreadsheets, paste text, or drop screenshots to run OCR. Mixing inputs for the same problem is supported.</li>
+                    <li>In the editor, fill required fields (marked with *), choose subfields, and attach images. Navigation warns about missing data but lets you continue.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">3. Use Assist Tools</h4>
+                  <ul>
+                    <li><strong>LLM generation</strong> rewrites the draft to the selected type and pushes structured fields.</li>
+                    <li><strong>Problem Q&A</strong> lets you interrogate the current problem (e.g., “Is the answer unique?”) without changing it.</li>
+                    <li><strong>Translation / LaTeX / OCR</strong> modules keep MathJax-safe output and reuse the same agent credentials.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">4. Review & Export</h4>
+                  <ul>
+                    <li>Reviewer status, feedback history, and manual notes stay with the latest generation round.</li>
+                    <li>When ready, export <strong>XLSX</strong> / <strong>dataset zip</strong> / <strong>images</strong> for backup. All data lives in your browser, so export frequently.</li>
+                  </ul>
+                </div>
+              </div>
+              <div style="flex:1; min-width: 280px">
+                <h3 style="margin:0">工作流概览</h3>
+                <p class="muted" style="margin:4px 0 12px 0">从配置到导出，一次掌握。</p>
+                <div class="card" style="margin-top:0">
+                  <h4 style="margin-top:0">1. 配置各代理</h4>
+                  <ul>
+                    <li>进入「LLM 配置」，在「整体设置」中一次性填写服务商 / Base URL / 模型 / Key，再到「详细设置」按需修改提示词。</li>
+                    <li>生成、审核、翻译、OCR、问答各自可以使用不同模型，开始前请确认。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">2. 采集与编辑</h4>
+                  <ul>
+                    <li>支持导入 Excel、粘贴文本、上传截图执行 OCR，同一题目可混合使用多种方式。</li>
+                    <li>在题目编辑区补全部分字段（带 * 为必填），选择分支领域并附带图片。跳题或保存时若信息不完整会弹窗提示。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">3. 使用辅助工具</h4>
+                  <ul>
+                    <li><strong>LLM 生成</strong> 根据目标题型重写题干、填充结构化字段。</li>
+                    <li><strong>针对当前问题提问</strong> 可随时向问答代理确认题意、知识点等，不会改动题目。</li>
+                    <li><strong>翻译 / LaTeX / OCR</strong> 保持 MathJax 兼容，便于跨语言和公式处理。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">4. 审核与导出</h4>
+                  <ul>
+                    <li>审核结果、生成历史与用户反馈会保存在题目侧边栏，便于回溯。</li>
+                    <li>完成后导出 <strong>XLSX</strong> / <strong>数据集</strong> / <strong>图片</strong> 以备份。所有数据存于浏览器，请定期导出。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="page" data-page="1">
+          <div class="card">
+            <div class="row" style="align-items:flex-start">
+              <div style="flex:1; min-width: 280px">
+                <h3 style="margin:0">Agent Directory</h3>
+                <p class="muted" style="margin:4px 0 12px 0">Each agent can be configured individually in LLM settings.</p>
+                <div class="card" style="margin-top:0">
+                  <h4 style="margin-top:0">Generator</h4>
+                  <ul>
+                    <li>Converts raw text + defaults into structured problems (Multiple Choice / Fill-in / Proof) and supplies metadata.</li>
+                    <li>Respects prior user feedback and conversation history when rerun.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">Reviewer</h4>
+                  <ul>
+                    <li>Audits generated drafts for clarity, structure, unique answers, and MathJax compliance.</li>
+                    <li>Returns JSON (status / issues / feedback). Auto-review stops after the configured max rounds.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">Translator</h4>
+                  <ul>
+                    <li>Bi-directional EN↔ZH translation while preserving LaTeX and math symbols.</li>
+                    <li>Accessible from the assist tools panel; outputs straight into question or answer fields.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">LaTeX & OCR</h4>
+                  <ul>
+                    <li><strong>LaTeX agent</strong> fixes MathJax syntax issues, balancing delimiters and replacing unsupported commands.</li>
+                    <li><strong>OCR agent</strong> extracts text from pasted screenshots; the recognized text can be merged into the editor.</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">Problem Q&A</h4>
+                  <ul>
+                    <li>Answers follow-up questions about the selected problem (e.g., “Is the proof valid?”, “Which topic does it cover?”).</li>
+                    <li>Replies in the same language as the user’s question and never edits the record.</li>
+                  </ul>
+                </div>
+              </div>
+              <div style="flex:1, min-width: 280px">
+                <h3 style="margin:0">代理功能一览</h3>
+                <p class="muted" style="margin:4px 0 12px 0">可在「LLM 配置」中为每个代理单独设置模型与提示词。</p>
+                <div class="card" style="margin-top:0">
+                  <h4 style="margin-top:0">题目生成代理</h4>
+                  <ul>
+                    <li>根据原文 + 默认选项生成结构化题目，支持选择题 / 填空题 / 证明题。</li>
+                    <li>会继承上一轮的用户反馈，逐步完善。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">审核代理</h4>
+                  <ul>
+                    <li>检查题干是否清晰、格式是否符合约定、答案是否唯一、MathJax 是否可渲染。</li>
+                    <li>返回 JSON（状态 / 问题 / 建议），超过最大轮次会自动停止。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">翻译代理</h4>
+                  <ul>
+                    <li>在中英文之间互译题目或答案，保持 LaTeX 与数学符号不变。</li>
+                    <li>在辅助工具中一键载入题干/答案并写回翻译结果。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">LaTeX / OCR 代理</h4>
+                  <ul>
+                    <li><strong>LaTeX 纠正</strong> 自动修复 MathJax 语法，替换不支持的命令。</li>
+                    <li><strong>OCR</strong> 识别截图中的文字，识别结果可直接写入题干。</li>
+                  </ul>
+                </div>
+                <div class="card" style="margin-top:12px">
+                  <h4 style="margin-top:0">问题问答代理</h4>
+                  <ul>
+                    <li>围绕当前题目回答追问，不会修改题干，只提供解释或建议。</li>
+                    <li>自动使用用户提问的语言作答，支持多轮对话。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-      <div class="card">
-        <h3 style="margin:0">中文</h3>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">使用流程</h4>
-          <ul>
-            <li>首先打开「LLM 配置」，在「整体设置」中统一填写服务商、Base URL、模型与密钥，再根据需要微调各代理的提示词。</li>
-            <li>导入 Excel、粘贴文本或手动录入题目，也可以在图片面板上传截图并执行 OCR 获取原文。</li>
-            <li>在题目编辑区校对题干、答案和元信息（分支领域、学术水平、难度等），必填项旁会显示「*」。</li>
-            <li>利用 LLM 辅助工具将题干改写成目标题型、补充缺失定义，或在中英之间快速翻译。</li>
-            <li>定期保存并导出数据，以防浏览器缓存被清理或更换设备。</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">题目编辑提示</h4>
-          <ul>
-            <li><strong>填空题</strong>务必加入显式空格（如「___」），若原题缺少定义，请补上一句简明定义以保持自洽。</li>
-            <li><strong>选择题</strong>会自动扩展到默认选项数量，必要时在「默认值」页面修改新建题目的选项数。</li>
-            <li><strong>分支领域</strong>支持多选，徽标右侧的×可快速删除；自定义条目会追加到最终结果字段。</li>
-            <li>保存或跳转下一题时若必填项未完成，会弹窗提示，可选择暂时忽略。</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">LLM 辅助工具</h4>
-          <ul>
-            <li><strong>使用 LLM 生成：</strong> 根据当前草稿重写题目并输出结构化字段，可多次迭代直至满足需求。</li>
-            <li><strong>翻译助手：</strong> 从题目或答案中提取文本、翻译并写回，保持数学符号与 LaTeX（兼容 MathJax）原样。</li>
-            <li><strong>LaTeX 纠正：</strong> 将 Unicode 数学字符转换为适配 MathJax 的规范 LaTeX 表达。</li>
-            <li><strong>OCR 工具：</strong> 上传截图后由 OCR 代理识别文字，支持预览与一键写入题干。</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">导入、导出与备份</h4>
-          <ul>
-            <li>通过「导入 XLSX」加载既有题库，导入前请确认列名与模板字段对应。</li>
-            <li>「导出数据集」生成 JSON，方便继续加工；「导出 XLSX」适合人工校对。</li>
-            <li>「导出图片」将合成画布与图片块打包到本地，请在清空题库或更换浏览器前执行。</li>
-            <li>所有内容存放在浏览器本地存储，建议定期备份，避免意外丢失。</li>
-          </ul>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h4 style="margin-top:0">常见问题</h4>
-          <ul>
-            <li>若提示未配置 LLM，请返回「LLM 配置」补全四个字段；可先在「整体设置」统一填写。</li>
-            <li>生成结果不理想时，可先补充上下文、切换题型或在提示词中提供更明确的要求，然后重新生成。</li>
-            <li>浏览器存储接近上限时，页面顶部的容量指示会变为橙色，请及时导出并清理。</li>
-          </ul>
-        </div>
+      <div class="row nav">
+        <button class="btn ghost" id="prevBtn">← Previous</button>
+        <span class="pill" id="pageIndicator">Page 1 / 2</span>
+        <button class="btn" id="nextBtn">Next →</button>
       </div>
     </div>
     <script>
-      // allow back to previous page if navigated via hash or link
+      const pages = Array.from(document.querySelectorAll('.page'));
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const indicator = document.getElementById('pageIndicator');
+      let index = 0;
+
+      function sync() {
+        pages.forEach((page, idx) => page.classList.toggle('active', idx === index));
+        indicator.textContent = `Page ${index + 1} / ${pages.length}`;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === pages.length - 1;
+        prevBtn.classList.toggle('ghost', true);
+        nextBtn.classList.toggle('ghost', index === pages.length - 1);
+      }
+
+      prevBtn.addEventListener('click', () => {
+        if (index > 0) {
+          index -= 1;
+          sync();
+        }
+      });
+      nextBtn.addEventListener('click', () => {
+        if (index < pages.length - 1) {
+          index += 1;
+          sync();
+        }
+      });
+      sync();
+
       if (document.referrer && document.referrer !== location.href) {
         const back = document.querySelector('a.btn.ghost');
         back?.addEventListener('click', function(e){
