@@ -199,6 +199,8 @@ interface AppState {
   setDefaults: (p: Partial<DefaultSettings>) => void;
   applyOptionsCountToExisting: (count: number) => void;
   clearAllProblems: () => void;
+  overallDraftConfig: LLMConfigState;
+  setOverallDraftConfig: (cfg: Partial<LLMConfigState>) => void;
 }
 
 const initialMode: Mode = 'agent';
@@ -250,6 +252,25 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
     };
   localStorage.setItem('llm-agents', JSON.stringify(fallback));
   return fallback;
+})();
+
+const initialOverallDraftConfig: LLMConfigState = (() => {
+  const raw = localStorage.getItem('llm-overall-draft');
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      const sanitized = sanitizeLLMConfig(parsed);
+      localStorage.setItem('llm-overall-draft', JSON.stringify(sanitized));
+      return sanitized;
+    } catch {}
+  }
+  const fallbackSource =
+    initialLLMAgents.generator?.config ||
+    initialLLMAgents.ocr?.config ||
+    sanitizeLLMConfig();
+  const sanitized = sanitizeLLMConfig(fallbackSource);
+  localStorage.setItem('llm-overall-draft', JSON.stringify(sanitized));
+  return sanitized;
 })();
 
 const createEmptyProblem = (defaults: DefaultSettings): ProblemRecord => ({
@@ -455,5 +476,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('problems', JSON.stringify([first]));
     localStorage.setItem('currentId', first.id);
     set({ problems: [first], currentId: first.id });
+  },
+  overallDraftConfig: initialOverallDraftConfig,
+  setOverallDraftConfig: (partial) => {
+    set((state) => {
+      const merged = sanitizeLLMConfig({ ...state.overallDraftConfig, ...partial });
+      localStorage.setItem('llm-overall-draft', JSON.stringify(merged));
+      return { overallDraftConfig: merged };
+    });
   }
 }));

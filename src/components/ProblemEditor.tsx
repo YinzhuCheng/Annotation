@@ -50,6 +50,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const store = useAppStore();
   const defaults = useAppStore((s) => s.defaults);
   const agents = useAppStore((s) => s.llmAgents);
+  const overallDraftConfig = useAppStore((s) => s.overallDraftConfig);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const current = useMemo(
@@ -718,50 +719,37 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     Boolean(cfg?.apiKey?.trim() && cfg?.model?.trim() && cfg?.baseUrl?.trim());
 
   const autoApplyOverallConfig = (): boolean => {
-    try {
-      const raw = localStorage.getItem("llm-overall-draft");
-      if (!raw) return false;
-      const parsed = JSON.parse(raw) as Partial<LLMConfigState>;
-      const apiKey = parsed.apiKey?.trim() || "";
-      const model = parsed.model?.trim() || "";
-      const baseUrl = parsed.baseUrl?.trim() || "";
-      const provider: LLMConfigState["provider"] =
-        parsed.provider === "gemini"
-          ? "gemini"
-          : parsed.provider === "claude"
-            ? "claude"
-            : "openai";
-      if (!apiKey || !model || !baseUrl) return false;
-      const storeState = useAppStore.getState();
-      let applied = false;
-      ALL_AGENT_IDS.forEach((id) => {
-        const currentAgent = storeState.llmAgents[id];
-        const nextConfig: LLMConfigState = {
-          provider,
-          apiKey,
-          model,
-          baseUrl,
-        };
-        const currentConfig = currentAgent?.config;
-        const differs =
-          !currentConfig ||
-          currentConfig.provider !== nextConfig.provider ||
-          currentConfig.apiKey !== nextConfig.apiKey ||
-          currentConfig.model !== nextConfig.model ||
-          currentConfig.baseUrl !== nextConfig.baseUrl;
-        if (differs) {
-          storeState.saveAgentSettings(id, {
-            ...currentAgent,
-            config: nextConfig,
-          });
-          applied = true;
-        }
-      });
-      return applied;
-    } catch (err) {
-      console.warn("Failed to auto-apply overall LLM config", err);
-      return false;
-    }
+    const apiKey = overallDraftConfig.apiKey?.trim();
+    const model = overallDraftConfig.model?.trim();
+    const baseUrl = overallDraftConfig.baseUrl?.trim();
+    if (!apiKey || !model || !baseUrl) return false;
+    const provider: LLMConfigState["provider"] = overallDraftConfig.provider || "openai";
+    const storeState = useAppStore.getState();
+    let applied = false;
+    ALL_AGENT_IDS.forEach((id) => {
+      const currentAgent = storeState.llmAgents[id];
+      const nextConfig: LLMConfigState = {
+        provider,
+        apiKey,
+        model,
+        baseUrl,
+      };
+      const currentConfig = currentAgent?.config;
+      const differs =
+        !currentConfig ||
+        currentConfig.provider !== nextConfig.provider ||
+        currentConfig.apiKey !== nextConfig.apiKey ||
+        currentConfig.model !== nextConfig.model ||
+        currentConfig.baseUrl !== nextConfig.baseUrl;
+      if (differs) {
+        storeState.saveAgentSettings(id, {
+          ...currentAgent,
+          config: nextConfig,
+        });
+        applied = true;
+      }
+    });
+    return applied;
   };
 
   const ensureAgent = (agentId: AgentId): boolean => {
