@@ -26,11 +26,11 @@ English | [中文](#中文说明)
 - Mode switching with autosave
 - LLM config stored locally (API key, model, base URL, provider)
 - OCR via Tesseract.js (client-side)
-- LaTeX Correction button (uses your configured LLM)
+- LaTeX Correction button (uses your configured LLM to produce MathJax-compatible output)
 - Image paste/upload preview; composed image path written during export
 - Import/Export XLSX with header:
   ```
-  id	Question	Question_type	Options	Answer	Subfield	Source	Image	Image_dependency	Academic_Level	Difficulty
+  id	Question	Question_Type	Options	Answer	Subfield	Source	Image	Image_Dependency	Academic_Level	Difficulty
   ```
 
 ## Cloudflare Pages
@@ -65,11 +65,11 @@ English | [中文](#中文说明)
 - 模式切换与自动保存
 - LLM 配置仅保存在本地（API Key、模型、Base URL、服务商）
 - 本地 OCR（Tesseract.js）
-- LaTeX 纠正按钮（调用已配置的 LLM）
+- LaTeX 纠正按钮（调用已配置的 LLM，输出适配 MathJax 的结果）
 - 图片粘贴/上传预览；导出时写入合成图片路径
 - 按如下表头导入/导出 XLSX：
   ```
-  id	Question	Question_type	Options	Answer	Subfield	Source	Image	Image_dependency	Academic_Level	Difficulty
+  id	Question	Question_Type	Options	Answer	Subfield	Source	Image	Image_Dependency	Academic_Level	Difficulty
   ```
 
 ### Cloudflare Pages
