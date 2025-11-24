@@ -23,6 +23,13 @@ const HEADER = [
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ACCEPTED_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'heif'];
 
+type ImportedRowPreview = {
+  id: string;
+  question: string;
+  questionType: string;
+  answer: string;
+};
+
 export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem } = useAppStore();
@@ -32,6 +39,7 @@ export function ImportExport() {
   const [importedImagesCount, setImportedImagesCount] = useState<number | null>(null);
   const [xlsxDisplayName, setXlsxDisplayName] = useState('');
   const [imagesDisplayName, setImagesDisplayName] = useState('');
+  const [xlsxFirstRowPreview, setXlsxFirstRowPreview] = useState<ImportedRowPreview | null>(null);
   const [xlsxContextMenu, setXlsxContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imagesContextMenu, setImagesContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [activePasteTarget, setActivePasteTarget] = useState<'xlsx' | 'images' | null>(null);
@@ -61,39 +69,41 @@ export function ImportExport() {
     el.setAttribute('directory', '');
   }, []);
 
-  const buildRows = () => problems.map(p => {
-    const question = String(p.question ?? '');
-    const questionType = p.questionType;
-    const optionsSerialized = questionType === 'Multiple Choice'
-      ? JSON.stringify((p.options || []).map((opt, i) => {
-          const label = String.fromCharCode(65 + i);
-          const trimmed = String(opt || '').trim();
-          if (!trimmed) return '';
-          const hasPrefix = new RegExp(`^${label}\s*:`).test(trimmed);
-          return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-        }))
-      : '';
-    const answer = String(p.answer ?? '');
-    const subfield = String(p.subfield ?? '');
-    const source = String(p.source ?? '');
-    const imageName = resolveImageFileName(p.image);
-    const imageDependency = imageName ? 1 : 0;
-    const academicLevel = String(p.academicLevel ?? '');
-    const difficulty = String(p.difficulty ?? '');
-    return [
-      p.id,
-      question,
-      questionType,
-      optionsSerialized,
-      answer,
-      subfield,
-      source,
-      imageName,
-      imageDependency,
-      academicLevel,
-      difficulty
-    ];
-  });
+  const buildRows = () => problems
+    .filter((p) => (p.question ?? '').trim().length > 0)
+    .map(p => {
+      const question = String(p.question ?? '');
+      const questionType = p.questionType;
+      const optionsSerialized = questionType === 'Multiple Choice'
+        ? JSON.stringify((p.options || []).map((opt, i) => {
+            const label = String.fromCharCode(65 + i);
+            const trimmed = String(opt || '').trim();
+            if (!trimmed) return '';
+            const hasPrefix = new RegExp(`^${label}\s*:`).test(trimmed);
+            return hasPrefix ? trimmed : `${label}: ${trimmed}`;
+          }))
+        : '';
+      const answer = String(p.answer ?? '');
+      const subfield = String(p.subfield ?? '');
+      const source = String(p.source ?? '');
+      const imageName = resolveImageFileName(p.image);
+      const imageDependency = imageName ? 1 : 0;
+      const academicLevel = String(p.academicLevel ?? '');
+      const difficulty = String(p.difficulty ?? '');
+      return [
+        p.id,
+        question,
+        questionType,
+        optionsSerialized,
+        answer,
+        subfield,
+        source,
+        imageName,
+        imageDependency,
+        academicLevel,
+        difficulty
+      ];
+    });
 
   const createWorksheet = (rows: (string | number)[][]) => {
     const data = [HEADER, ...rows];
@@ -185,7 +195,9 @@ export function ImportExport() {
     downloadBlob(out, `images-${Date.now()}.zip`);
   };
 
-  const importXlsx = async (file: File): Promise<number> => {
+  type ImportXlsxResult = { count: number; firstRow?: ImportedRowPreview };
+
+  const importXlsx = async (file: File): Promise<ImportXlsxResult> => {
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data);
     const ws = wb.Sheets[wb.SheetNames[0]];
@@ -199,6 +211,7 @@ export function ImportExport() {
       return -1;
     };
     let count = 0;
+    let firstRow: ImportedRowPreview | undefined;
     for (let i=1;i<arr.length;i++){
       const row = arr[i] as any[];
       if (!row?.length) continue;
@@ -238,8 +251,11 @@ export function ImportExport() {
       const difficulty = String(row[findIndex('Difficulty')] || '1') as any;
       upsertProblem({ id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
       count++;
+      if (!firstRow) {
+        firstRow = { id, question, questionType, answer };
+      }
     }
-    return count;
+    return { count, firstRow };
   };
 
   // Import images from dropped files/folders; filenames must be <id>.<ext>
@@ -297,13 +313,19 @@ export function ImportExport() {
     const eligible = files.filter(isXlsxFile);
     if (!eligible.length) {
       setXlsxDisplayName('');
+      setXlsxFirstRowPreview(null);
       return;
     }
     const base = formatTimestamp();
     const label = buildBatchLabel('xlsx', eligible.length, base);
     let total = 0;
+    let preview: ImportedRowPreview | null = null;
     for (const f of eligible) {
-      total += await importXlsx(f);
+      const { count, firstRow } = await importXlsx(f);
+      total += count;
+      if (!preview && firstRow) {
+        preview = firstRow;
+      }
     }
     if (total > 0) {
       setImportedCount(total);
@@ -311,6 +333,7 @@ export function ImportExport() {
       setImportedCount(null);
     }
     setXlsxDisplayName(label);
+    setXlsxFirstRowPreview(preview);
   };
 
   const handleImagesFiles = async (files: File[]) => {
@@ -329,6 +352,8 @@ export function ImportExport() {
     }
     setImagesDisplayName(label);
   };
+
+  const ellipsize = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}...` : value);
 
   const hasDirectoryEntry = (items: DataTransferItemList | null): boolean => {
     if (!items) return false;
@@ -446,6 +471,17 @@ export function ImportExport() {
           )}
           {importedCount !== null && (
             <span className="small">{t('importSuccess', { count: importedCount })}</span>
+          )}
+          {xlsxFirstRowPreview && (
+            <span className="small">
+              {t('importFirstRowPreviewLabel')}:{" "}
+              {xlsxFirstRowPreview.question
+                ? `"${ellipsize(xlsxFirstRowPreview.question, 80)}"`
+                : t('importFirstRowPreviewEmpty')}
+              {xlsxFirstRowPreview.answer
+                ? ` | ${t('answer')}: ${ellipsize(xlsxFirstRowPreview.answer, 60)}`
+                : ''}
+            </span>
           )}
         </div>
       </div>
