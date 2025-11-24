@@ -259,9 +259,8 @@ export function ImportExport() {
   };
 
   // Import images from dropped files/folders; filenames must be <id>.<ext>
-  const importImagesFromFiles = async (files: File[]): Promise<{ count: number; firstUpdatedId?: string }> => {
+  const importImagesFromFiles = async (files: File[]): Promise<number> => {
     let count = 0;
-    let firstUpdatedId: string | undefined;
     const setById = new Set(problems.map(p => p.id));
     for (const f of files) {
       const baseName = (f.name || '').trim();
@@ -277,9 +276,8 @@ export function ImportExport() {
       await saveImageBlobAtPath(path, f);
       upsertProblem({ id, image: path });
       count++;
-      if (!firstUpdatedId) firstUpdatedId = id;
     }
-    return { count, firstUpdatedId };
+    return count;
   };
 
   const isXlsxFile = (file: File) => {
@@ -349,14 +347,9 @@ export function ImportExport() {
     }
     const base = formatTimestamp();
     const label = buildBatchLabel('imgset', eligible.length, base);
-    const currentIdBefore = useAppStore.getState().currentId;
-    const { count, firstUpdatedId } = await importImagesFromFiles(eligible);
-    if (count > 0) {
-      setImportedImagesCount(count);
-      const targetId = firstUpdatedId || currentIdBefore || problems[0]?.id;
-      if (targetId) {
-        upsertProblem({ id: targetId });
-      }
+    const imported = await importImagesFromFiles(eligible);
+    if (imported > 0) {
+      setImportedImagesCount(imported);
     } else {
       setImportedImagesCount(null);
     }

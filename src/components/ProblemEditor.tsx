@@ -826,17 +826,30 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const handleSubmitFeedback = () => {
-    if (generatorHistory.length === 0) return;
     const trimmed = latestFeedback.trim();
-    setGeneratorHistory((prev) => {
-      if (prev.length === 0) return prev;
-      const next = [...prev];
-      next[next.length - 1] = {
-        ...next[next.length - 1],
-        feedback: trimmed.length > 0 ? trimmed : undefined,
-      };
-      return next;
-    });
+    if (generatorHistory.length === 0) {
+      if (!trimmed) return;
+      setGeneratorHistory((prev) => [
+        ...prev,
+        {
+          prompt: "",
+          response: "",
+          feedback: trimmed,
+          patch: {},
+          timestamp: Date.now(),
+        },
+      ]);
+    } else {
+      setGeneratorHistory((prev) => {
+        if (prev.length === 0) return prev;
+        const next = [...prev];
+        next[next.length - 1] = {
+          ...next[next.length - 1],
+          feedback: trimmed.length > 0 ? trimmed : undefined,
+        };
+        return next;
+      });
+    }
     setLatestFeedback("");
     setFeedbackSavedAt(Date.now());
   };
@@ -1867,26 +1880,28 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   )}
                 </div>
               )}
-              {generatorHistory.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <div>
-                    <div className="label" style={{ marginBottom: 4 }}>
-                      {t("llmConversationHistory")}
-                    </div>
-                    <div
-                      className="small"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {t("llmConversationHistoryHint")}
-                    </div>
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>
+                    {t("llmConversationHistory")}
                   </div>
+                  <div
+                    className="small"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {generatorHistory.length > 0
+                      ? t("llmConversationHistoryHint")
+                      : t("llmConversationHistoryEmpty")}
+                  </div>
+                </div>
+                {generatorHistory.length > 0 ? (
                   <div
                     style={{
                       display: "flex",
@@ -1963,46 +1978,60 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                       </div>
                     ))}
                   </div>
-                  <div>
-                    <div className="label" style={{ marginBottom: 4 }}>
-                      {t("llmUserFeedbackLabel")}
-                    </div>
-                    <textarea
-                      value={latestFeedback}
-                      onChange={(e) => setLatestFeedback(e.target.value)}
-                      rows={3}
-                      placeholder={t("llmFeedbackPlaceholder")}
-                      disabled={generatorHistory.length === 0}
-                    />
-                    <div
-                      className="row"
-                      style={{
-                        justifyContent: "flex-end",
-                        gap: 8,
-                        alignItems: "center",
-                        marginTop: 6,
-                        flexWrap: "wrap",
-                      }}
+                ) : (
+                  <div
+                    className="small"
+                    style={{
+                      border: "1px dashed var(--border)",
+                      borderRadius: 8,
+                      padding: 12,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {t("llmConversationHistoryEmpty")}
+                  </div>
+                )}
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>
+                    {t("llmUserFeedbackLabel")}
+                  </div>
+                  <textarea
+                    value={latestFeedback}
+                    onChange={(e) => setLatestFeedback(e.target.value)}
+                    rows={3}
+                    placeholder={t("llmFeedbackPlaceholder")}
+                  />
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      alignItems: "center",
+                      marginTop: 6,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={handleSubmitFeedback}
+                      disabled={
+                        generatorHistory.length === 0 &&
+                        latestFeedback.trim().length === 0
+                      }
                     >
-                      <button
-                        type="button"
-                        onClick={handleSubmitFeedback}
-                        disabled={generatorHistory.length === 0}
+                      {t("llmSubmitFeedback")}
+                    </button>
+                    {feedbackSavedAt && (
+                      <span
+                        className="small"
+                        style={{ color: "var(--text-muted)" }}
                       >
-                        {t("llmSubmitFeedback")}
-                      </button>
-                      {feedbackSavedAt && (
-                        <span
-                          className="small"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          {t("saved")}
-                        </span>
-                      )}
-                    </div>
+                        {t("saved")}
+                      </span>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
