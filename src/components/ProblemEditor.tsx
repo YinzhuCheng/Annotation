@@ -1301,6 +1301,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     store.upsertProblem({});
     setSavedAt(Date.now());
   };
+  const handleDeleteCurrent = () => {
+    const confirmed = window.confirm(t("confirmDeleteProblem"));
+    if (!confirmed) return;
+    store.deleteProblem(current.id);
+    setSavedAt(null);
+  };
 
   const addSubfield = (value: string) => {
     const v = value.trim();
@@ -1468,6 +1474,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             }}
           >
             {t("previewProblem")}
+          </button>
+          <button onClick={handleDeleteCurrent}>
+            {t("deleteProblemButton")}
           </button>
         </div>
         <div
