@@ -4,7 +4,12 @@ import type {
   DragEvent as ReactDragEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore, ProblemRecord, AgentId } from "../state/store";
+import {
+  useAppStore,
+  ProblemRecord,
+  AgentId,
+  LLMConfigState,
+} from "../state/store";
 import {
   chatStream,
   latexCorrection,
@@ -108,6 +113,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     | "ocr"
   >(null);
   const DOT_SEQUENCE = [" .", " ..", " ..."] as const;
+  const ALL_AGENT_IDS: AgentId[] = [
+    "ocr",
+    "latex",
+    "generator",
+    "reviewer",
+    "translator",
+    "qa",
+  ];
   const [dotStep, setDotStep] = useState(0);
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
@@ -635,19 +648,53 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   const openViewer = (src: string) =>
     openViewerWindow(src, { title: t("viewLarge"), back: t("back") });
-  const ensureAgent = (agentId: AgentId): boolean => {
-    const cfg = agents[agentId]?.config;
-    if (!cfg?.apiKey?.trim() || !cfg?.model?.trim() || !cfg?.baseUrl?.trim()) {
-      alert(
-        `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
-      );
-      const anchor =
-        document.querySelector('[data-llm-config-section="true"]') ||
-        document.querySelector(".label");
-      anchor?.scrollIntoView({ behavior: "smooth" });
+  const hasValidConfig = (cfg?: LLMConfigState | null) =>
+    Boolean(cfg?.apiKey?.trim() && cfg?.model?.trim() && cfg?.baseUrl?.trim());
+
+  const autoApplyOverallConfig = (): boolean => {
+    try {
+      const raw = localStorage.getItem("llm-overall-draft");
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as Partial<LLMConfigState>;
+      const apiKey = parsed.apiKey?.trim();
+      const model = parsed.model?.trim();
+      const baseUrl = parsed.baseUrl?.trim();
+      const provider = (parsed.provider as LLMConfigState["provider"]) || "openai";
+      if (!apiKey || !model || !baseUrl) return false;
+      const storeState = useAppStore.getState();
+      ALL_AGENT_IDS.forEach((id) => {
+        const currentAgent = storeState.llmAgents[id];
+        storeState.saveAgentSettings(id, {
+          ...currentAgent,
+          config: {
+            provider,
+            apiKey,
+            model,
+            baseUrl,
+          },
+        });
+      });
+      return true;
+    } catch (err) {
+      console.warn("Failed to auto-apply overall LLM config", err);
       return false;
     }
-    return true;
+  };
+
+  const ensureAgent = (agentId: AgentId): boolean => {
+    if (hasValidConfig(agents[agentId]?.config)) return true;
+    if (autoApplyOverallConfig()) {
+      const refreshed = useAppStore.getState().llmAgents[agentId]?.config;
+      if (hasValidConfig(refreshed)) return true;
+    }
+    alert(
+      `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
+    );
+    const anchor =
+      document.querySelector('[data-llm-config-section="true"]') ||
+      document.querySelector(".label");
+    anchor?.scrollIntoView({ behavior: "smooth" });
+    return false;
   };
 
   const fixLatex = async (field: "question" | "answer") => {
@@ -2191,7 +2238,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   className="small"
                   style={{ color: "var(--text-muted)" }}
                 >
-                  {t("waitingLLMResponse")}
+                  {qaStatus === "waiting_response"
+                    ? t("waitingLLMResponse")
+                    : t("waitingLLMThinking")}
                   {dotPattern}
                 </span>
               )}

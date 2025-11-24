@@ -111,6 +111,19 @@ export function LLMConfig() {
     return { config: result, unified };
   }, [agentIds, drafts]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('llm-overall-draft', JSON.stringify(overallConfig.config));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [
+    overallConfig.config.provider,
+    overallConfig.config.apiKey,
+    overallConfig.config.model,
+    overallConfig.config.baseUrl
+  ]);
+
   const handleConfigChange = (id: AgentId, field: keyof LLMAgentSettings['config'], value: string) => {
     setDrafts((prev) => ({
       ...prev,
