@@ -496,10 +496,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     };
   }, [latexInput]);
 
+  const isQaBusy = qaStatus !== "idle" && qaStatus !== "done";
+
   useEffect(() => {
     const active =
       (llmStatus !== "idle" && llmStatus !== "done") ||
-      (translationStatus !== "idle" && translationStatus !== "done");
+      (translationStatus !== "idle" && translationStatus !== "done") ||
+      isQaBusy;
     if (!active) {
       setDotStep(0);
       return;
@@ -509,7 +512,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       500,
     );
     return () => clearInterval(timer);
-  }, [llmStatus, translationStatus]);
+  }, [llmStatus, translationStatus, isQaBusy]);
   const dotPattern = DOT_SEQUENCE[dotStep];
   const isGeneratorBusy =
     llmStatusSource === "generate" &&
