@@ -124,6 +124,15 @@ const resources = {
       assistToolGenerator: 'LLM-assisted problem generation',
       assistToolGeneratorHint: 'Let the generator rephrase the current draft to match the selected problem type, add missing definitions, and autofill structured fields.',
       assistToolGeneratorAction: 'Run generation',
+      qaAssistantTitle: 'Problem Q&A assistant',
+      qaAssistantHint: 'Ask clarifying questions about the current problem. The assistant references the existing fields but never rewrites the draft.',
+      qaAssistantInputPlaceholder: 'Ask in any language—the reply will mirror your wording.',
+      qaAssistantSend: 'Send question',
+      qaAssistantClear: 'Clear conversation',
+      qaAssistantEmpty: 'No Q&A yet. Ask whether the answer is correct, what concepts it covers, or any other detail.',
+      qaAssistantError: 'Q&A error: {{message}}',
+      qaAssistantUserLabel: 'You',
+      qaAssistantAgentLabel: 'Assistant',
       assistToolTranslation: 'Translation assistant',
       assistToolOcr: 'Image text extraction',
       assistToolLatex: 'MathJax correction',
@@ -209,6 +218,8 @@ const resources = {
         , agentReviewerDesc: 'Audits questions for clarity, unique answers, and formatting compliance.'
       , agentTranslator: 'Translation Agent'
       , agentTranslatorDesc: 'Translates questions or answers between English and Chinese.'
+      , agentQa: 'Problem Q&A Agent'
+      , agentQaDesc: 'Answers clarifying questions about the current problem without modifying it.'
       , agentEditPrompt: 'Set Prompt'
       , agentCopyPlaceholder: 'Copy config from…'
       , agentPromptEditorTitle: 'Edit prompt for {{agent}}'
@@ -363,6 +374,15 @@ const resources = {
       assistToolGenerator: 'LLM辅助问题生成',
       assistToolGeneratorHint: '引导大语言模型重写题干、补全结构化字段并保持目标题型一致。',
       assistToolGeneratorAction: '运行生成',
+      qaAssistantTitle: '针对当前问题提问',
+      qaAssistantHint: '围绕当前题目发问，助手会参考已填字段回答，但不会改写题干。',
+      qaAssistantInputPlaceholder: '使用任意语言提问（回复会保持相同语言）…',
+      qaAssistantSend: '发送问题',
+      qaAssistantClear: '清空对话',
+      qaAssistantEmpty: '尚无提问，可以先询问题目是否正确、涉及哪些知识点等。',
+      qaAssistantError: '问答出错：{{message}}',
+      qaAssistantUserLabel: '你',
+      qaAssistantAgentLabel: '助手',
       assistToolTranslation: '翻译助手',
       assistToolOcr: '图片提取文字',
       assistToolLatex: 'LaTeX渲染',
@@ -448,6 +468,8 @@ const resources = {
         , agentReviewerDesc: '对生成结果进行质检，确保描述清晰、答案唯一且格式符合规范。'
       , agentTranslator: '翻译代理'
       , agentTranslatorDesc: '用于在中英文之间转换题目或答案。'
+      , agentQa: '问题问答代理'
+      , agentQaDesc: '针对当前题目回答追问，不会修改题干。'
       , agentEditPrompt: '设置提示词'
       , agentCopyPlaceholder: '从其他代理复制配置…'
       , agentPromptEditorTitle: '编辑 {{agent}} 的提示词'

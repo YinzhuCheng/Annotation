@@ -6,10 +6,12 @@ import type {
 import { useTranslation } from "react-i18next";
 import { useAppStore, ProblemRecord, AgentId } from "../state/store";
 import {
+  chatStream,
   latexCorrection,
   ocrWithLLM,
   translateWithLLM,
 } from "../lib/llmAdapter";
+import type { ChatMessage } from "../lib/llmAdapter";
 import { getImageBlob, saveImageBlobAtPath } from "../lib/db";
 import { openViewerWindow } from "../lib/viewer";
 import {
@@ -34,6 +36,8 @@ type GeneratorTurnState = GeneratorConversationTurn & {
   timestamp: number;
   review?: ReviewAuditResult & { attempts: number; forced: boolean };
 };
+
+type QAHistoryTurn = ChatMessage & { timestamp: number };
 
 export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
@@ -125,6 +129,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [forcedReviewAccept, setForcedReviewAccept] = useState(false);
   const [latestFeedback, setLatestFeedback] = useState("");
   const [feedbackSavedAt, setFeedbackSavedAt] = useState<number | null>(null);
+  const [qaConversation, setQaConversation] = useState<QAHistoryTurn[]>([]);
+  const [qaInput, setQaInput] = useState("");
+  const [qaStatus, setQaStatus] = useState<
+    "idle" | "waiting_response" | "thinking" | "responding" | "done"
+  >("idle");
+  const [qaError, setQaError] = useState("");
   const [latexInput, setLatexInput] = useState("");
   const [latexRenderError, setLatexRenderError] = useState("");
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
@@ -138,6 +148,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       generator: t("agentGenerator"),
       reviewer: t("agentReviewer"),
       translator: t("agentTranslator"),
+      qa: t("agentQa"),
     }),
     [t],
   );
@@ -335,6 +346,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLatexInput("");
     setLatexRenderError("");
     setLatexErrors([]);
+    setQaConversation([]);
+    setQaInput("");
+    setQaStatus("idle");
+    setQaError("");
   }, [current.id]);
 
   useEffect(() => {
@@ -852,6 +867,90 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     }
     setLatestFeedback("");
     setFeedbackSavedAt(Date.now());
+  };
+
+  const buildQaContext = () => {
+    const lines: string[] = [];
+    lines.push("Context for the conversation (do not regenerate the problem):");
+    lines.push(`Question Type: ${current.questionType}`);
+    lines.push(`Subfield: ${current.subfield?.trim() || "<missing>"}`);
+    lines.push(`Academic Level: ${current.academicLevel?.trim() || "<missing>"}`);
+    lines.push(`Difficulty: ${current.difficulty?.trim() || "<missing>"}`);
+    lines.push(`Source: ${current.source?.trim() || "<missing>"}`);
+    lines.push("");
+    lines.push("Question:");
+    lines.push(current.question?.trim() || "<missing>");
+    lines.push("");
+    if (current.questionType === "Multiple Choice") {
+      lines.push("Options:");
+      (current.options || []).forEach((opt, idx) => {
+        const label = String.fromCharCode(65 + idx);
+        const value = opt?.trim() || "<empty>";
+        lines.push(`${label}. ${value}`);
+      });
+      if (!current.options || current.options.length === 0) {
+        lines.push("<no options provided>");
+      }
+      lines.push("");
+    } else {
+      lines.push("Options: (none)");
+      lines.push("");
+    }
+    lines.push("Answer:");
+    lines.push(current.answer?.trim() || "<missing>");
+    lines.push("");
+    lines.push("Important: respond in the same language as the user's next question. Do not rewrite the problem—only answer questions about it.");
+    return lines.join("\n");
+  };
+
+  const clearQaConversation = () => {
+    setQaConversation([]);
+    setQaInput("");
+    setQaStatus("idle");
+    setQaError("");
+  };
+
+  const askQaAssistant = async () => {
+    const trimmed = qaInput.trim();
+    if (!trimmed) return;
+    if (!ensureAgent("qa")) return;
+    setQaError("");
+    const contextBlock = buildQaContext();
+    const systemPrompt = agents.qa.prompt?.trim() || "";
+    setQaStatus("waiting_response");
+    try {
+      const historyMessages: ChatMessage[] = qaConversation.map((turn) => ({
+        role: turn.role,
+        content: turn.content,
+      }));
+      const messages: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `${contextBlock}`,
+        },
+        ...historyMessages,
+        { role: "user", content: trimmed },
+      ];
+      const answer = await chatStream(
+        messages,
+        agents.qa.config,
+        { temperature: 0 },
+        { onStatus: (s) => setQaStatus(s) },
+      );
+      const now = Date.now();
+      setQaConversation((prev) => [
+        ...prev,
+        { role: "user", content: trimmed, timestamp: now },
+        { role: "assistant", content: answer, timestamp: now + 1 },
+      ]);
+      setQaInput("");
+      setQaStatus("done");
+    } catch (err: any) {
+      const message = err?.message ? String(err.message) : String(err);
+      setQaError(message);
+      setQaStatus("idle");
+    }
   };
 
   const loadLatexFrom = (field: "question" | "answer") => {
@@ -2031,6 +2130,134 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div
+                className="row"
+                style={{
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div className="label" style={{ marginBottom: 4 }}>
+                    {t("qaAssistantTitle")}
+                  </div>
+                  <div
+                    className="small"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {t("qaAssistantHint")}
+                  </div>
+                </div>
+                <div
+                  className="row"
+                  style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}
+                >
+                  <button
+                    type="button"
+                    onClick={clearQaConversation}
+                    disabled={
+                      qaConversation.length === 0 && qaInput.trim().length === 0
+                    }
+                  >
+                    {t("qaAssistantClear")}
+                  </button>
+                  {qaStatus !== "idle" && qaStatus !== "done" && (
+                    <span className="small">
+                      {t("waitingLLMResponse")}
+                      {dotPattern}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {qaConversation.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {qaConversation.map((turn) => (
+                    <div
+                      key={turn.timestamp}
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        padding: 8,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <div className="small" style={{ fontWeight: 600 }}>
+                        {turn.role === "user"
+                          ? t("qaAssistantUserLabel")
+                          : t("qaAssistantAgentLabel")}
+                      </div>
+                      <div
+                        className="small"
+                        style={{ whiteSpace: "pre-wrap" }}
+                      >
+                        {turn.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="small"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {t("qaAssistantEmpty")}
+                </div>
+              )}
+              {qaError && (
+                <span className="small" style={{ color: "#f87171" }}>
+                  {t("qaAssistantError", { message: qaError })}
+                </span>
+              )}
+              <textarea
+                value={qaInput}
+                onChange={(e) => setQaInput(e.target.value)}
+                rows={3}
+                placeholder={t("qaAssistantInputPlaceholder")}
+              />
+              <div
+                className="row"
+                style={{
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={askQaAssistant}
+                  disabled={
+                    qaInput.trim().length === 0 ||
+                    qaStatus === "waiting_response" ||
+                    qaStatus === "thinking" ||
+                    qaStatus === "responding"
+                  }
+                >
+                  {t("qaAssistantSend")}
+                </button>
               </div>
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />

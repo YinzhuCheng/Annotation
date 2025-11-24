@@ -16,7 +16,8 @@ function cloneAgentsState(source: Record<AgentId, LLMAgentSettings>): Record<Age
     latex: { config: { ...source.latex.config }, prompt: source.latex.prompt },
     generator: { config: { ...source.generator.config }, prompt: source.generator.prompt },
     reviewer: { config: { ...source.reviewer.config }, prompt: source.reviewer.prompt },
-    translator: { config: { ...source.translator.config }, prompt: source.translator.prompt }
+    translator: { config: { ...source.translator.config }, prompt: source.translator.prompt },
+    qa: { config: { ...source.qa.config }, prompt: source.qa.prompt }
   };
 }
 
@@ -34,7 +35,8 @@ export function LLMConfig() {
     latex: null,
     generator: null,
     reviewer: null,
-    translator: null
+    translator: null,
+    qa: null
   });
   const [overallSavedAt, setOverallSavedAt] = useState<number | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<PromptEditorState>(null);
@@ -80,7 +82,8 @@ export function LLMConfig() {
     { id: 'latex', title: t('agentLatex'), description: t('agentLatexDesc') },
     { id: 'generator', title: t('agentGenerator'), description: t('agentGeneratorDesc') },
     { id: 'reviewer', title: t('agentReviewer'), description: t('agentReviewerDesc') },
-    { id: 'translator', title: t('agentTranslator'), description: t('agentTranslatorDesc') }
+    { id: 'translator', title: t('agentTranslator'), description: t('agentTranslatorDesc') },
+    { id: 'qa', title: t('agentQa'), description: t('agentQaDesc') }
   ]), [t]);
 
   const agentTitles = useMemo<Record<AgentId, string>>(() => (

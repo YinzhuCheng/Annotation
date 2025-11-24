@@ -9,7 +9,7 @@ export interface LLMConfigState {
   model: string;
 }
 
-export type AgentId = 'ocr' | 'latex' | 'generator' | 'reviewer' | 'translator';
+export type AgentId = 'ocr' | 'latex' | 'generator' | 'reviewer' | 'translator' | 'qa';
 
 export interface LLMAgentSettings {
   config: LLMConfigState;
@@ -63,6 +63,13 @@ export const DEFAULT_DIFFICULTY_PROMPT = 'Difficulty (1=easy, 3=hard)';
 const DEFAULT_OPTIONS_COUNT = 5;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
+const DEFAULT_QA_PROMPT = `You are a helpful subject-matter expert for math assessment authors. You will receive the fully structured problem (question, options, answer, metadata). Your job is to answer the user's follow-up questions about this exact problem without altering the draft.
+
+Guidelines:
+- Reference the provided fields when explaining your reasoning, but do not rewrite or regenerate the question.
+- If the user asks in Chinese, answer in Chinese; otherwise reply in the same language they used. Mirror mixed-language queries as well.
+- When you are unsure, say so and suggest what additional details would help.`;
+
 const DEFAULT_AGENT_PROMPTS: Record<AgentId, string> = {
   ocr: `You are a meticulous OCR engine for mathematical documents. Extract every piece of readable text from the provided image and return plain UTF-8 text only.
 
@@ -95,24 +102,22 @@ Guidelines:
 - Keep mathematical notation, LaTeX commands, equations, and labels unchanged and compatible with MathJax.
 - Maintain bullet lists, numbering, and paragraph breaks.
 - Retain proper nouns and technical terms in a consistent, context-appropriate form.
-- Return only the translated text without explanations or back-translations.`
-  ,
+- Return only the translated text without explanations or back-translations.`,
   reviewer: `You are a meticulous QA reviewer for structured math problems. You will receive the full <Generated Question> block plus parsed fields. Assess the draft and reply with strict JSON using double quotes:
 {
   "status": "pass" | "fail",
   "issues": ["description 1", "description 2"],
   "feedback": "Actionable summary"
-}
+  }
 
 Pass only if:
 1. The question text is clear, contains no undefined terminology, and has no ambiguity.
 2. The output preserves the exact contract structure (<Generated Question> block with required fields).
 3. For Multiple Choice, there are at least two options, exactly one correct choice, and the stated answer matches that option.
 
-When failing, list each issue in "issues" and ensure "feedback" briefly explains how to fix them. Do not include any other text.`
+When failing, list each issue in "issues" and ensure "feedback" briefly explains how to fix them. Do not include any other text.`,
+  qa: DEFAULT_QA_PROMPT
 };
-
-const AGENT_IDS: AgentId[] = ['ocr', 'latex', 'generator', 'reviewer', 'translator'];
 
 function sanitizeList(input: unknown, fallback: string[]): string[] {
   const arr = Array.isArray(input) ? input : [];
@@ -222,7 +227,8 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
           latex: sanitizeAgentSettings(parsed?.latex, DEFAULT_AGENT_PROMPTS.latex),
           generator: sanitizeAgentSettings(parsed?.generator, DEFAULT_AGENT_PROMPTS.generator),
           reviewer: sanitizeAgentSettings(parsed?.reviewer, DEFAULT_AGENT_PROMPTS.reviewer),
-          translator: sanitizeAgentSettings(parsed?.translator, DEFAULT_AGENT_PROMPTS.translator)
+          translator: sanitizeAgentSettings(parsed?.translator, DEFAULT_AGENT_PROMPTS.translator),
+          qa: sanitizeAgentSettings(parsed?.qa, DEFAULT_AGENT_PROMPTS.qa)
         };
       localStorage.setItem('llm-agents', JSON.stringify(sanitized));
       return sanitized;
@@ -238,7 +244,8 @@ const initialLLMAgents: Record<AgentId, LLMAgentSettings> = (() => {
       latex: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.latex },
       generator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.generator },
       reviewer: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.reviewer },
-      translator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.translator }
+      translator: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.translator },
+      qa: { config: sanitizeLLMConfig(legacyConfig), prompt: DEFAULT_AGENT_PROMPTS.qa }
     };
   localStorage.setItem('llm-agents', JSON.stringify(fallback));
   return fallback;
