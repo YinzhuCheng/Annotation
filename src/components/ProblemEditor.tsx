@@ -2184,14 +2184,17 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   >
                     {t("qaAssistantClear")}
                   </button>
-                  {qaStatus !== "idle" && qaStatus !== "done" && (
-                    <span className="small">
-                      {t("waitingLLMResponse")}
-                      {dotPattern}
-                    </span>
-                  )}
                 </div>
               </div>
+              {qaStatus !== "idle" && qaStatus !== "done" && (
+                <span
+                  className="small"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {t("waitingLLMResponse")}
+                  {dotPattern}
+                </span>
+              )}
               {qaConversation.length > 0 ? (
                 <div
                   style={{
