@@ -398,15 +398,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ problems: next, currentId: p.id });
   },
   deleteProblem: (id) => {
-    const next = get().problems.filter((p) => p.id !== id);
+    const problems = get().problems;
+    const idx = problems.findIndex((p) => p.id === id);
+    if (idx === -1) return;
+
+    const next = problems.filter((p) => p.id !== id);
     localStorage.setItem('problems', JSON.stringify(next));
+
+    let nextId: string | null = get().currentId;
     if (get().currentId === id) {
-      const nid = next[0]?.id || null;
-      if (nid) localStorage.setItem('currentId', nid); else localStorage.removeItem('currentId');
-      set({ problems: next, currentId: nid });
-    } else {
-      set({ problems: next });
+      const fallback =
+        next[idx] !== undefined
+          ? next[idx].id
+          : next[idx - 1] !== undefined
+            ? next[idx - 1].id
+            : null;
+      nextId = fallback;
+      if (nextId) {
+        localStorage.setItem('currentId', nextId);
+      } else {
+        localStorage.removeItem('currentId');
+      }
     }
+
+    set({ problems: next, currentId: nextId });
   },
   applyOptionsCountToExisting: (count: number) => {
     const next = get().problems.map((p) => {
