@@ -16,7 +16,7 @@ import {
   ocrWithLLM,
   translateWithLLM,
 } from "../lib/llmAdapter";
-import type { ChatMessage } from "../lib/llmAdapter";
+import type { ChatContent, ChatMessage, ImageUrlContent } from "../lib/llmAdapter";
 import { getImageBlob, saveImageBlobAtPath } from "../lib/db";
 import { openViewerWindow } from "../lib/viewer";
 import {
@@ -26,6 +26,7 @@ import {
   reviewGeneratedQuestion,
   ReviewAuditResult,
 } from "../lib/generator";
+import { resolveImageDataUrl } from "../lib/imageAttachments";
 import {
   buildDisplayName,
   collectFilesFromItems,
@@ -88,6 +89,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>("");
   const [ocrDisplayName, setOcrDisplayName] = useState("");
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>("");
+  const [problemImageDataUrl, setProblemImageDataUrl] = useState<string | null>(
+    null,
+  );
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const [ocrContextMenu, setOcrContextMenu] = useState<{
     x: number;
@@ -122,6 +126,28 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     "qa",
   ];
   const [dotStep, setDotStep] = useState(0);
+  const buildProblemImageAttachment = (): ImageUrlContent | null =>
+    problemImageDataUrl
+      ? { type: "image_url", image_url: { url: problemImageDataUrl } }
+      : null;
+  const composeWithProblemImage = (text: string): ChatContent => {
+    const attachment = buildProblemImageAttachment();
+    return attachment
+      ? [
+          { type: "text", text },
+          attachment,
+        ]
+      : text;
+  };
+  const describeChatContent = (content: ChatContent): string => {
+    if (typeof content === "string") return content;
+    const placeholder = t("qaAssistantImagePlaceholder");
+    return content
+      .map((segment) =>
+        segment.type === "text" ? segment.text : placeholder,
+      )
+      .join("\n\n");
+  };
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
   const [translationStatus, setTranslationStatus] = useState<
@@ -555,6 +581,32 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     };
   }, [current.image]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const path = current.image?.trim();
+    if (!path) {
+      setProblemImageDataUrl(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    (async () => {
+      try {
+        const dataUrl = await resolveImageDataUrl(path);
+        if (!cancelled) {
+          setProblemImageDataUrl(dataUrl);
+        }
+      } catch {
+        if (!cancelled) {
+          setProblemImageDataUrl(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [current.id, current.image]);
+
   const update = (patch: Partial<ProblemRecord>) =>
     store.upsertProblem({ id: current.id, ...patch });
 
@@ -786,6 +838,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
     if (!ensureAgent("generator") || !ensureAgent("reviewer")) return;
+    const sharedImageAttachment = buildProblemImageAttachment();
     const maxReviewRounds = Math.max(1, defaults.maxReviewRounds || 3);
     setLlmStatusSource("generate");
     setGeneratorPreview("");
@@ -809,6 +862,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           {
             onStatus: (s) => setLlmStatus(s),
             conversation: [...historyConversation, ...dynamicConversation],
+            imageAttachment: sharedImageAttachment || undefined,
           },
         );
         workingProblem = {
@@ -826,7 +880,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             targetType: workingProblem.questionType,
           },
           agents.reviewer,
-          { onStatus: (s) => setLlmStatus(s) },
+          {
+            onStatus: (s) => setLlmStatus(s),
+            imageAttachment: sharedImageAttachment || undefined,
+          },
         );
 
         setReviewerPreview(review.raw);
@@ -983,14 +1040,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         role: turn.role,
         content: turn.content,
       }));
+      const contextContent = composeWithProblemImage(contextBlock);
+      const nextQuestionContent = composeWithProblemImage(trimmed);
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `${contextBlock}`,
-        },
+        { role: "user", content: contextContent },
         ...historyMessages,
-        { role: "user", content: trimmed },
+        { role: "user", content: nextQuestionContent },
       ];
       const answer = await chatStream(
         messages,
@@ -1001,7 +1057,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       const now = Date.now();
       setQaConversation((prev) => [
         ...prev,
-        { role: "user", content: trimmed, timestamp: now },
+        { role: "user", content: nextQuestionContent, timestamp: now },
         { role: "assistant", content: answer, timestamp: now + 1 },
       ]);
       setQaInput("");
@@ -2325,7 +2381,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                             className="small"
                             style={{ whiteSpace: "pre-wrap" }}
                           >
-                            {turn.content}
+                            {describeChatContent(turn.content)}
                           </div>
                         </div>
                       ))}

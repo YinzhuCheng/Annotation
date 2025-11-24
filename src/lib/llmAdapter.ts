@@ -1,6 +1,7 @@
 import { LLMConfigState, LLMAgentSettings } from '../state/store';
+import { blobToDataUrl } from './blob';
 
-type ImageUrlContent = { type: 'image_url'; image_url: { url: string } };
+export type ImageUrlContent = { type: 'image_url'; image_url: { url: string } };
 type TextContent = { type: 'text'; text: string };
 export type ChatContent = string | Array<TextContent | ImageUrlContent>;
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: ChatContent };
@@ -134,15 +135,6 @@ export async function latexCorrection(
   ], agent.config, { temperature: 0 }, handlers);
 
   return out.trim();
-}
-
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }
 
 export async function ocrWithLLM(

@@ -1,9 +1,16 @@
 // Cloudflare Pages Function: /api/llm
+type ApiChatContent = string | Array<
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+>;
+
+type ApiChatMessage = { role: 'system' | 'user' | 'assistant'; content: ApiChatContent };
+
 export const onRequestPost: PagesFunction = async (context) => {
   try {
     const body = await context.request.json();
     const { messages, llm, extra } = body as {
-      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      messages: ApiChatMessage[];
       llm: { provider: 'openai' | 'gemini' | 'claude'; apiKey: string; model: string; baseUrl?: string };
       extra?: { temperature?: number; maxTokens?: number };
     };

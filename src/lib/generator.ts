@@ -1,7 +1,16 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
+import type { ChatContent, ImageUrlContent } from './llmAdapter';
 
 const FORMAT_FIX_RETRY_LIMIT = 3;
+
+const composeChatContent = (text: string, attachment?: ImageUrlContent | null): ChatContent => {
+  if (!attachment) return text;
+  return [
+    { type: 'text', text },
+    { type: 'image_url', image_url: { url: attachment.image_url.url } }
+  ];
+};
 
 export interface ParsedGeneratedQuestion {
   question: string;
@@ -335,6 +344,7 @@ export async function generateProblemFromText(
   options?: {
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
     conversation?: GeneratorConversationTurn[];
+    imageAttachment?: ImageUrlContent | null;
   }
 ): Promise<{ patch: Partial<ProblemRecord>; raw: string; generatedBlock: string; parsed: ParsedGeneratedQuestion }> {
   const baseInput = input.trim();
@@ -498,7 +508,7 @@ export async function generateProblemFromText(
 
   const baseMessages = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: user }
+    { role: 'user', content: composeChatContent(user, options?.imageAttachment) }
   ];
 
   const handlers = options?.onStatus ? { onStatus: options.onStatus } : undefined;
@@ -656,6 +666,7 @@ export async function reviewGeneratedQuestion(
   agent: LLMAgentSettings,
   options?: {
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
+    imageAttachment?: ImageUrlContent | null;
   }
 ): Promise<ReviewAuditResult> {
   const effectiveType: ProblemRecord['questionType'] = (draft.patch.questionType as ProblemRecord['questionType']) || draft.targetType;
@@ -717,9 +728,10 @@ export async function reviewGeneratedQuestion(
   lines.push(draft.raw);
 
   const system = agent.prompt?.trim() || DEFAULT_AGENT_PROMPTS.reviewer;
+  const reviewContent = composeChatContent(lines.join('\n'), options?.imageAttachment);
   const rawReview = await chatStream([
     { role: 'system', content: system },
-    { role: 'user', content: lines.join('\n') }
+    { role: 'user', content: reviewContent }
   ], agent.config, { temperature: 0 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
 
   const parsed = parseReviewerJson(rawReview);
