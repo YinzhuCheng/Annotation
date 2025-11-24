@@ -4,12 +4,19 @@ import type {
   DragEvent as ReactDragEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore, ProblemRecord, AgentId } from "../state/store";
 import {
+  useAppStore,
+  ProblemRecord,
+  AgentId,
+  LLMConfigState,
+} from "../state/store";
+import {
+  chatStream,
   latexCorrection,
   ocrWithLLM,
   translateWithLLM,
 } from "../lib/llmAdapter";
+import type { ChatMessage } from "../lib/llmAdapter";
 import { getImageBlob, saveImageBlobAtPath } from "../lib/db";
 import { openViewerWindow } from "../lib/viewer";
 import {
@@ -34,6 +41,8 @@ type GeneratorTurnState = GeneratorConversationTurn & {
   timestamp: number;
   review?: ReviewAuditResult & { attempts: number; forced: boolean };
 };
+
+type QAHistoryTurn = ChatMessage & { timestamp: number };
 
 export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
@@ -103,7 +112,15 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     | "latex_preview"
     | "ocr"
   >(null);
-  const DOT_SEQUENCE = [".", " ..", " ..."] as const;
+  const DOT_SEQUENCE = [" .", " ..", " ..."] as const;
+  const ALL_AGENT_IDS: AgentId[] = [
+    "ocr",
+    "latex",
+    "generator",
+    "reviewer",
+    "translator",
+    "qa",
+  ];
   const [dotStep, setDotStep] = useState(0);
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
@@ -125,9 +142,25 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [forcedReviewAccept, setForcedReviewAccept] = useState(false);
   const [latestFeedback, setLatestFeedback] = useState("");
   const [feedbackSavedAt, setFeedbackSavedAt] = useState<number | null>(null);
+  const [qaConversation, setQaConversation] = useState<QAHistoryTurn[]>([]);
+  const [qaInput, setQaInput] = useState("");
+  const [qaStatus, setQaStatus] = useState<
+    "idle" | "waiting_response" | "thinking" | "responding" | "done"
+  >("idle");
+  const [qaError, setQaError] = useState("");
   const [latexInput, setLatexInput] = useState("");
   const [latexRenderError, setLatexRenderError] = useState("");
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
+  const [toolCollapse, setToolCollapse] = useState({
+    generator: false,
+    qa: false,
+    translation: false,
+    latex: false,
+    ocr: false,
+  });
+
+  const toggleTool = (key: keyof typeof toolCollapse) =>
+    setToolCollapse((prev) => ({ ...prev, [key]: !prev[key] }));
   const [questionMathJaxError, setQuestionMathJaxError] = useState("");
   const [answerMathJaxError, setAnswerMathJaxError] = useState("");
   const [previewMathJaxError, setPreviewMathJaxError] = useState("");
@@ -138,6 +171,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       generator: t("agentGenerator"),
       reviewer: t("agentReviewer"),
       translator: t("agentTranslator"),
+      qa: t("agentQa"),
     }),
     [t],
   );
@@ -335,6 +369,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setLatexInput("");
     setLatexRenderError("");
     setLatexErrors([]);
+    setQaConversation([]);
+    setQaInput("");
+    setQaStatus("idle");
+    setQaError("");
   }, [current.id]);
 
   useEffect(() => {
@@ -468,10 +506,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     };
   }, [latexInput]);
 
+  const isQaBusy = qaStatus !== "idle" && qaStatus !== "done";
+
   useEffect(() => {
     const active =
       (llmStatus !== "idle" && llmStatus !== "done") ||
-      (translationStatus !== "idle" && translationStatus !== "done");
+      (translationStatus !== "idle" && translationStatus !== "done") ||
+      isQaBusy;
     if (!active) {
       setDotStep(0);
       return;
@@ -481,7 +522,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       500,
     );
     return () => clearInterval(timer);
-  }, [llmStatus, translationStatus]);
+  }, [llmStatus, translationStatus, isQaBusy]);
   const dotPattern = DOT_SEQUENCE[dotStep];
   const isGeneratorBusy =
     llmStatusSource === "generate" &&
@@ -620,19 +661,53 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   const openViewer = (src: string) =>
     openViewerWindow(src, { title: t("viewLarge"), back: t("back") });
-  const ensureAgent = (agentId: AgentId): boolean => {
-    const cfg = agents[agentId]?.config;
-    if (!cfg?.apiKey?.trim() || !cfg?.model?.trim() || !cfg?.baseUrl?.trim()) {
-      alert(
-        `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
-      );
-      const anchor =
-        document.querySelector('[data-llm-config-section="true"]') ||
-        document.querySelector(".label");
-      anchor?.scrollIntoView({ behavior: "smooth" });
+  const hasValidConfig = (cfg?: LLMConfigState | null) =>
+    Boolean(cfg?.apiKey?.trim() && cfg?.model?.trim() && cfg?.baseUrl?.trim());
+
+  const autoApplyOverallConfig = (): boolean => {
+    try {
+      const raw = localStorage.getItem("llm-overall-draft");
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as Partial<LLMConfigState>;
+      const apiKey = parsed.apiKey?.trim();
+      const model = parsed.model?.trim();
+      const baseUrl = parsed.baseUrl?.trim();
+      const provider = (parsed.provider as LLMConfigState["provider"]) || "openai";
+      if (!apiKey || !model || !baseUrl) return false;
+      const storeState = useAppStore.getState();
+      ALL_AGENT_IDS.forEach((id) => {
+        const currentAgent = storeState.llmAgents[id];
+        storeState.saveAgentSettings(id, {
+          ...currentAgent,
+          config: {
+            provider,
+            apiKey,
+            model,
+            baseUrl,
+          },
+        });
+      });
+      return true;
+    } catch (err) {
+      console.warn("Failed to auto-apply overall LLM config", err);
       return false;
     }
-    return true;
+  };
+
+  const ensureAgent = (agentId: AgentId): boolean => {
+    if (hasValidConfig(agents[agentId]?.config)) return true;
+    if (autoApplyOverallConfig()) {
+      const refreshed = useAppStore.getState().llmAgents[agentId]?.config;
+      if (hasValidConfig(refreshed)) return true;
+    }
+    alert(
+      `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
+    );
+    const anchor =
+      document.querySelector('[data-llm-config-section="true"]') ||
+      document.querySelector(".label");
+    anchor?.scrollIntoView({ behavior: "smooth" });
+    return false;
   };
 
   const fixLatex = async (field: "question" | "answer") => {
@@ -826,19 +901,116 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const handleSubmitFeedback = () => {
-    if (generatorHistory.length === 0) return;
     const trimmed = latestFeedback.trim();
-    setGeneratorHistory((prev) => {
-      if (prev.length === 0) return prev;
-      const next = [...prev];
-      next[next.length - 1] = {
-        ...next[next.length - 1],
-        feedback: trimmed.length > 0 ? trimmed : undefined,
-      };
-      return next;
-    });
+    if (generatorHistory.length === 0) {
+      if (!trimmed) return;
+      setGeneratorHistory((prev) => [
+        ...prev,
+        {
+          prompt: "",
+          response: "",
+          feedback: trimmed,
+          patch: {},
+          timestamp: Date.now(),
+        },
+      ]);
+    } else {
+      setGeneratorHistory((prev) => {
+        if (prev.length === 0) return prev;
+        const next = [...prev];
+        next[next.length - 1] = {
+          ...next[next.length - 1],
+          feedback: trimmed.length > 0 ? trimmed : undefined,
+        };
+        return next;
+      });
+    }
     setLatestFeedback("");
     setFeedbackSavedAt(Date.now());
+  };
+
+  const buildQaContext = () => {
+    const lines: string[] = [];
+    lines.push("Context for the conversation (do not regenerate the problem):");
+    lines.push(`Question Type: ${current.questionType}`);
+    lines.push(`Subfield: ${current.subfield?.trim() || "<missing>"}`);
+    lines.push(`Academic Level: ${current.academicLevel?.trim() || "<missing>"}`);
+    lines.push(`Difficulty: ${current.difficulty?.trim() || "<missing>"}`);
+    lines.push(`Source: ${current.source?.trim() || "<missing>"}`);
+    lines.push("");
+    lines.push("Question:");
+    lines.push(current.question?.trim() || "<missing>");
+    lines.push("");
+    if (current.questionType === "Multiple Choice") {
+      lines.push("Options:");
+      (current.options || []).forEach((opt, idx) => {
+        const label = String.fromCharCode(65 + idx);
+        const value = opt?.trim() || "<empty>";
+        lines.push(`${label}. ${value}`);
+      });
+      if (!current.options || current.options.length === 0) {
+        lines.push("<no options provided>");
+      }
+      lines.push("");
+    } else {
+      lines.push("Options: (none)");
+      lines.push("");
+    }
+    lines.push("Answer:");
+    lines.push(current.answer?.trim() || "<missing>");
+    lines.push("");
+    lines.push("Important: respond in the same language as the user's next question. Do not rewrite the problem—only answer questions about it.");
+    return lines.join("\n");
+  };
+
+  const clearQaConversation = () => {
+    setQaConversation([]);
+    setQaInput("");
+    setQaStatus("idle");
+    setQaError("");
+  };
+
+  const askQaAssistant = async () => {
+    const trimmed = qaInput.trim();
+    if (!trimmed) return;
+    if (!ensureAgent("qa")) return;
+    setQaError("");
+    const contextBlock = buildQaContext();
+    const systemPrompt = agents.qa.prompt?.trim() || "";
+    setQaStatus("waiting_response");
+    try {
+      const historyMessages: ChatMessage[] = qaConversation.map((turn) => ({
+        role: turn.role,
+        content: turn.content,
+      }));
+      const messages: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `${contextBlock}`,
+        },
+        ...historyMessages,
+        { role: "user", content: trimmed },
+      ];
+      const answer = await chatStream(
+        messages,
+        agents.qa.config,
+        { temperature: 0 },
+        { onStatus: (s) => setQaStatus(s) },
+      );
+      const now = Date.now();
+      setQaConversation((prev) => [
+        ...prev,
+        { role: "user", content: trimmed, timestamp: now },
+        { role: "assistant", content: answer, timestamp: now + 1 },
+      ]);
+      setQaInput("");
+      setQaStatus("done");
+    } catch (err: any) {
+      const message = err?.message ? String(err.message) : String(err);
+      setQaError(message);
+      setQaStatus("idle");
+    }
   };
 
   const loadLatexFrom = (field: "question" | "answer") => {
@@ -1139,6 +1311,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     store.upsertProblem({});
     setSavedAt(Date.now());
   };
+  const handleDeleteCurrent = () => {
+    const confirmed = window.confirm(t("confirmDeleteProblem"));
+    if (!confirmed) return;
+    store.deleteProblem(current.id);
+    setSavedAt(null);
+  };
 
   const addSubfield = (value: string) => {
     const v = value.trim();
@@ -1306,6 +1484,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             }}
           >
             {t("previewProblem")}
+          </button>
+          <button onClick={handleDeleteCurrent}>
+            {t("deleteProblemButton")}
           </button>
         </div>
         <div
@@ -1760,7 +1941,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
 
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolGenerator")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -1768,240 +1952,427 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               </div>
               <div
                 className="row"
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
+              >
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("generator")}
+                >
+                  {toolCollapse.generator
+                    ? t("expandSection")
+                    : t("collapseSection")}
+                </button>
+              </div>
+              {!toolCollapse.generator && (
+                <>
+                  <div
+                    className="row"
+                    style={{
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      marginTop: 8,
+                    }}
+                  >
+                    <button className="primary" onClick={generate}>
+                      {t("assistToolGeneratorAction")}
+                    </button>
+                    {isGeneratorBusy && (
+                      <span className="small">
+                        {t("llmGeneratorInProgress")}
+                        {dotPattern}
+                      </span>
+                    )}
+                    {!isGeneratorBusy && isReviewerBusy && (
+                      <span className="small">
+                        {t("llmReviewerInProgress")}
+                        {dotPattern}
+                      </span>
+                    )}
+                  </div>
+                  {generatorPreview && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmReply")}
+                      </div>
+                      <textarea
+                        readOnly
+                        value={generatorPreview}
+                        rows={8}
+                        style={{
+                          width: "100%",
+                          fontFamily: "var(--font-mono, monospace)",
+                        }}
+                      />
+                    </div>
+                  )}
+                  {(reviewStatus !== null || reviewerPreview) && (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("reviewerReply")}
+                      </div>
+                      {reviewerPreview ? (
+                        <textarea
+                          readOnly
+                          value={reviewerPreview}
+                          rows={6}
+                          style={{
+                            width: "100%",
+                            fontFamily: "var(--font-mono, monospace)",
+                          }}
+                        />
+                      ) : null}
+                      {reviewStatus !== null && (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          <strong>{t("reviewerStatusLabel")}:</strong>{' '}
+                          {reviewStatus === "pass"
+                            ? t("reviewerStatusPass")
+                            : t("reviewerStatusFail")}
+                        </div>
+                      )}
+                      {reviewAttempts > 0 && (
+                        <div className="small">
+                          {t("reviewerAttemptsLabel", { count: reviewAttempts })}
+                        </div>
+                      )}
+                      {reviewIssues.length > 0 ? (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {t("reviewerIssuesLabel")}
+                          </div>
+                          <ul style={{ margin: "4px 0 0 16px" }}>
+                            {reviewIssues.map((issue, idx) => (
+                              <li key={idx}>{issue}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : reviewStatus === "pass" ? (
+                        <div
+                          className="small"
+                          style={{ marginTop: 4, color: "var(--text-muted)" }}
+                        >
+                          {t("reviewerNoIssues")}
+                        </div>
+                      ) : null}
+                      {forcedReviewAccept && (
+                        <div
+                          className="small"
+                          style={{ marginTop: 4, color: "#f97316" }}
+                        >
+                          {t("reviewerForcedAcceptNotice", {
+                            count: defaults.maxReviewRounds || 3,
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmConversationHistory")}
+                      </div>
+                      <div
+                        className="small"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {generatorHistory.length > 0
+                          ? t("llmConversationHistoryHint")
+                          : t("llmConversationHistoryEmpty")}
+                      </div>
+                    </div>
+                    {generatorHistory.length > 0 ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          maxHeight: 220,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {generatorHistory.map((turn, idx) => (
+                          <div
+                            key={turn.timestamp}
+                            style={{
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              padding: 8,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 6,
+                            }}
+                          >
+                            <div className="small" style={{ fontWeight: 600 }}>
+                              {t("llmTurnLabel", { index: idx + 1 })}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmPromptLabel")}:</strong>{' '}
+                              {turn.prompt || t("llmEmptyValue")}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmResponseLabel")}:</strong>{' '}
+                              {turn.response || t("llmEmptyValue")}
+                            </div>
+                            <div
+                              className="small"
+                              style={{ whiteSpace: "pre-wrap" }}
+                            >
+                              <strong>{t("llmUserFeedbackLabel")}:</strong>{' '}
+                              {turn.feedback || t("llmEmptyValue")}
+                            </div>
+                            {turn.review && (
+                              <div
+                                className="small"
+                                style={{ whiteSpace: "pre-wrap" }}
+                              >
+                                <strong>{t("reviewerStatusLabel")}:</strong>{' '}
+                                {turn.review.status === "pass"
+                                  ? t("reviewerStatusPass")
+                                  : t("reviewerStatusFail")} {'('}
+                                {t("reviewerAttemptsLabel", {
+                                  count: turn.review.attempts,
+                                })}
+                                {')'}
+                                {turn.review.forced && (
+                                  <span
+                                    style={{ color: "#f97316", marginLeft: 6 }}
+                                  >
+                                    {t("reviewerForcedAcceptShort")}
+                                  </span>
+                                )}
+                                {turn.review.issues.length > 0 && (
+                                  <ul style={{ margin: "4px 0 0 16px" }}>
+                                    {turn.review.issues.map((issue, idx) => (
+                                      <li key={idx}>{issue}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="small"
+                        style={{
+                          border: "1px dashed var(--border)",
+                          borderRadius: 8,
+                          padding: 12,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {t("llmConversationHistoryEmpty")}
+                      </div>
+                    )}
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("llmUserFeedbackLabel")}
+                      </div>
+                      <textarea
+                        value={latestFeedback}
+                        onChange={(e) => setLatestFeedback(e.target.value)}
+                        rows={3}
+                        placeholder={t("llmFeedbackPlaceholder")}
+                      />
+                      <div
+                        className="row"
+                        style={{
+                          justifyContent: "flex-end",
+                          gap: 8,
+                          alignItems: "center",
+                          marginTop: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={handleSubmitFeedback}
+                          disabled={
+                            generatorHistory.length === 0 &&
+                            latestFeedback.trim().length === 0
+                          }
+                        >
+                          {t("llmSubmitFeedback")}
+                        </button>
+                        {feedbackSavedAt && (
+                          <span
+                            className="small"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {t("saved")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <hr className="div" style={{ margin: "12px 0" }} />
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              <div
+                className="row"
                 style={{
-                  gap: 8,
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
                   flexWrap: "wrap",
-                  alignItems: "center",
-                  marginTop: 8,
+                  gap: 8,
                 }}
               >
-                <button className="primary" onClick={generate}>
-                  {t("assistToolGeneratorAction")}
-                </button>
-                {isGeneratorBusy && (
-                  <span className="small">
-                    {t("llmGeneratorInProgress")}
-                    {dotPattern}
-                  </span>
-                )}
-                {!isGeneratorBusy && isReviewerBusy && (
-                  <span className="small">
-                    {t("llmReviewerInProgress")}
-                    {dotPattern}
-                  </span>
-                )}
-              </div>
-              {generatorPreview && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("llmReply")}
-                  </div>
-                  <textarea
-                    readOnly
-                    value={generatorPreview}
-                    rows={8}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div
+                    className="label"
                     style={{
-                      width: "100%",
-                      fontFamily: "var(--font-mono, monospace)",
+                      marginBottom: 4,
+                      fontSize: "1.05rem",
+                      fontWeight: 600,
                     }}
-                  />
-                </div>
-              )}
-              {(reviewStatus !== null || reviewerPreview) && (
-                <div style={{ marginTop: 12 }}>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("reviewerReply")}
+                  >
+                    {t("qaAssistantTitle")}
                   </div>
-                  {reviewerPreview ? (
-                    <textarea
-                      readOnly
-                      value={reviewerPreview}
-                      rows={6}
-                      style={{
-                        width: "100%",
-                        fontFamily: "var(--font-mono, monospace)",
-                      }}
-                    />
-                  ) : null}
-                  {reviewStatus !== null && (
-                    <div className="small" style={{ marginTop: 4 }}>
-                      <strong>{t("reviewerStatusLabel")}:</strong>{" "}
-                      {reviewStatus === "pass"
-                        ? t("reviewerStatusPass")
-                        : t("reviewerStatusFail")}
-                    </div>
-                  )}
-                  {reviewAttempts > 0 && (
-                    <div className="small">
-                      {t("reviewerAttemptsLabel", { count: reviewAttempts })}
-                    </div>
-                  )}
-                  {reviewIssues.length > 0 ? (
-                    <div className="small" style={{ marginTop: 4 }}>
-                      <div style={{ fontWeight: 600 }}>
-                        {t("reviewerIssuesLabel")}
-                      </div>
-                      <ul style={{ margin: "4px 0 0 16px" }}>
-                        {reviewIssues.map((issue, idx) => (
-                          <li key={idx}>{issue}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : reviewStatus === "pass" ? (
-                    <div
-                      className="small"
-                      style={{ marginTop: 4, color: "var(--text-muted)" }}
-                    >
-                      {t("reviewerNoIssues")}
-                    </div>
-                  ) : null}
-                  {forcedReviewAccept && (
-                    <div
-                      className="small"
-                      style={{ marginTop: 4, color: "#f97316" }}
-                    >
-                      {t("reviewerForcedAcceptNotice", {
-                        count: defaults.maxReviewRounds || 3,
-                      })}
-                    </div>
-                  )}
+                  <div
+                    className="small"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {t("qaAssistantHint")}
+                  </div>
                 </div>
-              )}
-              {generatorHistory.length > 0 && (
                 <div
-                  style={{
-                    marginTop: 12,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
+                  className="row"
+                  style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}
                 >
-                  <div>
-                    <div className="label" style={{ marginBottom: 4 }}>
-                      {t("llmConversationHistory")}
-                    </div>
-                    <div
+                  <button
+                    type="button"
+                    onClick={clearQaConversation}
+                    disabled={
+                      qaConversation.length === 0 && qaInput.trim().length === 0
+                    }
+                  >
+                    {t("qaAssistantClear")}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => toggleTool("qa")}
+                  >
+                    {toolCollapse.qa ? t("expandSection") : t("collapseSection")}
+                  </button>
+                </div>
+              </div>
+              {!toolCollapse.qa && (
+                <>
+                  {qaStatus !== "idle" && qaStatus !== "done" && (
+                    <span
                       className="small"
                       style={{ color: "var(--text-muted)" }}
                     >
-                      {t("llmConversationHistoryHint")}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 8,
-                      maxHeight: 220,
-                      overflowY: "auto",
-                    }}
-                  >
-                    {generatorHistory.map((turn, idx) => (
-                      <div
-                        key={turn.timestamp}
-                        style={{
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          padding: 8,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 6,
-                        }}
-                      >
-                        <div className="small" style={{ fontWeight: 600 }}>
-                          {t("llmTurnLabel", { index: idx + 1 })}
-                        </div>
+                      {qaStatus === "waiting_response"
+                        ? t("waitingLLMResponse")
+                        : t("waitingLLMThinking")}
+                      {dotPattern}
+                    </span>
+                  )}
+                  {qaConversation.length > 0 ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        maxHeight: 220,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {qaConversation.map((turn) => (
                         <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
+                          key={turn.timestamp}
+                          style={{
+                            border: "1px solid var(--border)",
+                            borderRadius: 8,
+                            padding: 8,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
                         >
-                          <strong>{t("llmPromptLabel")}:</strong>{" "}
-                          {turn.prompt || t("llmEmptyValue")}
-                        </div>
-                        <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          <strong>{t("llmResponseLabel")}:</strong>{" "}
-                          {turn.response || t("llmEmptyValue")}
-                        </div>
-                        <div
-                          className="small"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          <strong>{t("llmUserFeedbackLabel")}:</strong>{" "}
-                          {turn.feedback || t("llmEmptyValue")}
-                        </div>
-                        {turn.review && (
+                          <div className="small" style={{ fontWeight: 600 }}>
+                            {turn.role === "user"
+                              ? t("qaAssistantUserLabel")
+                              : t("qaAssistantAgentLabel")}
+                          </div>
                           <div
                             className="small"
                             style={{ whiteSpace: "pre-wrap" }}
                           >
-                            <strong>{t("reviewerStatusLabel")}:</strong>{" "}
-                            {turn.review.status === "pass"
-                              ? t("reviewerStatusPass")
-                              : t("reviewerStatusFail")}{" "}
-                            (
-                            {t("reviewerAttemptsLabel", {
-                              count: turn.review.attempts,
-                            })}
-                            )
-                            {turn.review.forced && (
-                              <span style={{ color: "#f97316", marginLeft: 6 }}>
-                                {t("reviewerForcedAcceptShort")}
-                              </span>
-                            )}
-                            {turn.review.issues.length > 0 && (
-                              <ul style={{ margin: "4px 0 0 16px" }}>
-                                {turn.review.issues.map((issue, idx) => (
-                                  <li key={idx}>{issue}</li>
-                                ))}
-                              </ul>
-                            )}
+                            {turn.content}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div>
-                    <div className="label" style={{ marginBottom: 4 }}>
-                      {t("llmUserFeedbackLabel")}
+                        </div>
+                      ))}
                     </div>
-                    <textarea
-                      value={latestFeedback}
-                      onChange={(e) => setLatestFeedback(e.target.value)}
-                      rows={3}
-                      placeholder={t("llmFeedbackPlaceholder")}
-                      disabled={generatorHistory.length === 0}
-                    />
+                  ) : (
                     <div
-                      className="row"
-                      style={{
-                        justifyContent: "flex-end",
-                        gap: 8,
-                        alignItems: "center",
-                        marginTop: 6,
-                        flexWrap: "wrap",
-                      }}
+                      className="small"
+                      style={{ color: "var(--text-muted)" }}
                     >
-                      <button
-                        type="button"
-                        onClick={handleSubmitFeedback}
-                        disabled={generatorHistory.length === 0}
-                      >
-                        {t("llmSubmitFeedback")}
-                      </button>
-                      {feedbackSavedAt && (
-                        <span
-                          className="small"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          {t("saved")}
-                        </span>
-                      )}
+                      {t("qaAssistantEmpty")}
                     </div>
+                  )}
+                  {qaError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {t("qaAssistantError", { message: qaError })}
+                    </span>
+                  )}
+                  <textarea
+                    value={qaInput}
+                    onChange={(e) => setQaInput(e.target.value)}
+                    rows={3}
+                    placeholder={t("qaAssistantInputPlaceholder")}
+                  />
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={askQaAssistant}
+                      disabled={
+                        qaInput.trim().length === 0 ||
+                        qaStatus === "waiting_response" ||
+                        qaStatus === "thinking" ||
+                        qaStatus === "responding"
+                      }
+                    >
+                      {t("qaAssistantSend")}
+                    </button>
                   </div>
-                </div>
+                </>
               )}
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
@@ -2015,106 +2386,138 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   gap: 8,
                 }}
               >
-                <div className="label" style={{ margin: 0 }}>
+                <div
+                  className="label"
+                  style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}
+                >
                   {t("assistToolTranslation")}
                 </div>
-                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => loadTranslationFrom("question")}
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("translation")}
+                >
+                  {toolCollapse.translation
+                    ? t("expandSection")
+                    : t("collapseSection")}
+                </button>
+              </div>
+              {!toolCollapse.translation && (
+                <>
+                  <div
+                    className="row"
+                    style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
                   >
-                    {t("translationLoadQuestion")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadTranslationFrom("answer")}
-                  >
-                    {t("translationLoadAnswer")}
-                  </button>
-                  <select
-                    value={translationTarget}
-                    onChange={(e) =>
-                      setTranslationTarget(e.target.value as "en" | "zh")
-                    }
-                  >
-                    <option value="zh">{t("translationTargetZh")}</option>
-                    <option value="en">{t("translationTargetEn")}</option>
-                  </select>
-                  <div className="row" style={{ gap: 6, alignItems: "center" }}>
                     <button
                       type="button"
-                      className="primary"
-                      onClick={runTranslation}
+                      onClick={() => loadTranslationFrom("question")}
                     >
-                      {t("translationRun")}
+                      {t("translationLoadQuestion")}
                     </button>
-                    {translationStatus !== "idle" &&
-                      translationStatus !== "done" && (
-                        <span className="small">
-                          {translationStatus === "waiting_response"
-                            ? t("waitingLLMResponse")
-                            : t("waitingLLMThinking")}
-                          {dotPattern}
-                        </span>
-                      )}
+                    <button
+                      type="button"
+                      onClick={() => loadTranslationFrom("answer")}
+                    >
+                      {t("translationLoadAnswer")}
+                    </button>
+                    <select
+                      value={translationTarget}
+                      onChange={(e) =>
+                        setTranslationTarget(e.target.value as "en" | "zh")
+                      }
+                    >
+                      <option value="zh">{t("translationTargetZh")}</option>
+                      <option value="en">{t("translationTargetEn")}</option>
+                    </select>
                   </div>
-                </div>
-              </div>
-              {translationError && (
-                <span className="small" style={{ color: "#f87171" }}>
-                  {translationError}
-                </span>
+                  {translationError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {translationError}
+                    </span>
+                  )}
+                  <div
+                    className="grid"
+                    style={{
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("translationInputLabel")}
+                      </div>
+                      <textarea
+                        value={translationInput}
+                        onChange={(e) => setTranslationInput(e.target.value)}
+                        rows={6}
+                      />
+                    </div>
+                    <div>
+                      <div className="label" style={{ marginBottom: 4 }}>
+                        {t("translationOutputLabel")}
+                      </div>
+                      <textarea
+                        value={translationOutput}
+                        onChange={(e) => setTranslationOutput(e.target.value)}
+                        rows={6}
+                      />
+                    </div>
+                  </div>
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      marginTop: 8,
+                    }}
+                  >
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={runTranslation}
+                      >
+                        {t("translationRun")}
+                      </button>
+                      {translationStatus !== "idle" &&
+                        translationStatus !== "done" && (
+                          <span className="small">
+                            {translationStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        translationOutput &&
+                        update({ question: translationOutput })
+                      }
+                    >
+                      {t("translationApplyQuestion")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        translationOutput && update({ answer: translationOutput })
+                      }
+                    >
+                      {t("translationApplyAnswer")}
+                    </button>
+                  </div>
+                </>
               )}
-              <div
-                className="grid"
-                style={{ gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}
-              >
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("translationInputLabel")}
-                  </div>
-                  <textarea
-                    value={translationInput}
-                    onChange={(e) => setTranslationInput(e.target.value)}
-                    rows={6}
-                  />
-                </div>
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>
-                    {t("translationOutputLabel")}
-                  </div>
-                  <textarea
-                    value={translationOutput}
-                    onChange={(e) => setTranslationOutput(e.target.value)}
-                    rows={6}
-                  />
-                </div>
-              </div>
-              <div
-                className="row"
-                style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    translationOutput && update({ question: translationOutput })
-                  }
-                >
-                  {t("translationApplyQuestion")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    translationOutput && update({ answer: translationOutput })
-                  }
-                >
-                  {t("translationApplyAnswer")}
-                </button>
-              </div>
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolLatex")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -2122,246 +2525,282 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               </div>
               <div
                 className="row"
-                style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
               >
-                <button type="button" onClick={() => loadLatexFrom("question")}>
-                  {t("assistToolLatexLoadQuestion")}
-                </button>
-                <button type="button" onClick={() => loadLatexFrom("answer")}>
-                  {t("assistToolLatexLoadAnswer")}
-                </button>
                 <button
                   type="button"
-                  onClick={clearLatexInput}
-                  disabled={!latexHasSource}
+                  className="ghost"
+                  onClick={() => toggleTool("latex")}
                 >
-                  {t("assistToolLatexClear")}
+                  {toolCollapse.latex
+                    ? t("expandSection")
+                    : t("collapseSection")}
                 </button>
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={fixLatexPreview}
-                    disabled={!latexHasSource}
+              </div>
+              {!toolCollapse.latex && (
+                <>
+                  <div
+                    className="row"
+                    style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}
                   >
-                    {t("assistToolLatexFix")}
-                  </button>
-                  {llmStatusSource === "latex_preview" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
+                    <button type="button" onClick={() => loadLatexFrom("question")}>
+                      {t("assistToolLatexLoadQuestion")}
+                    </button>
+                    <button type="button" onClick={() => loadLatexFrom("answer")}>
+                      {t("assistToolLatexLoadAnswer")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearLatexInput}
+                      disabled={!latexHasSource}
+                    >
+                      {t("assistToolLatexClear")}
+                    </button>
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={fixLatexPreview}
+                        disabled={!latexHasSource}
+                      >
+                        {t("assistToolLatexFix")}
+                      </button>
+                      {llmStatusSource === "latex_preview" &&
+                        llmStatus !== "idle" &&
+                        llmStatus !== "done" && (
+                          <span className="small">
+                            {llmStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                  </div>
+                  <textarea
+                    value={latexInput}
+                    onChange={(e) => setLatexInput(e.target.value)}
+                    rows={6}
+                    placeholder={t("assistToolLatexPlaceholder")}
+                    style={{
+                      marginTop: 8,
+                      fontFamily: "var(--font-mono, monospace)",
+                    }}
+                  />
+                  {latexRenderError && (
+                    <span className="small" style={{ color: "#f87171" }}>
+                      {t("assistToolLatexRenderError", { error: latexRenderError })}
+                    </span>
+                  )}
+                  {latexErrors.length > 0 && (
+                    <div className="small" style={{ marginTop: 8 }}>
+                      <div style={{ fontWeight: 600 }}>
+                        {t("assistToolLatexErrorsTitle")}
+                      </div>
+                      <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+                        {latexErrors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {latexHasSource &&
+                    !latexRenderError &&
+                    latexErrors.length === 0 && (
+                      <span
+                        className="small"
+                        style={{
+                          color: "var(--text-muted)",
+                          display: "block",
+                          marginTop: 8,
+                        }}
+                      >
+                        {t("assistToolLatexNoIssues")}
                       </span>
                     )}
-                </div>
-              </div>
-              <textarea
-                value={latexInput}
-                onChange={(e) => setLatexInput(e.target.value)}
-                rows={6}
-                placeholder={t("assistToolLatexPlaceholder")}
-                style={{
-                  marginTop: 8,
-                  fontFamily: "var(--font-mono, monospace)",
-                }}
-              />
-              {latexRenderError && (
-                <span className="small" style={{ color: "#f87171" }}>
-                  {t("assistToolLatexRenderError", { error: latexRenderError })}
-                </span>
-              )}
-              {latexErrors.length > 0 && (
-                <div className="small" style={{ marginTop: 8 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {t("assistToolLatexErrorsTitle")}
-                  </div>
-                  <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
-                    {latexErrors.map((err, idx) => (
-                      <li key={idx}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {latexHasSource &&
-                !latexRenderError &&
-                latexErrors.length === 0 && (
-                  <span
-                    className="small"
-                    style={{
-                      color: "var(--text-muted)",
-                      display: "block",
-                      marginTop: 8,
-                    }}
-                  >
-                    {t("assistToolLatexNoIssues")}
-                  </span>
-                )}
-              {latexHasSource && (
-                <div
-                  ref={latexPreviewRef}
-                  style={{
-                    marginTop: 8,
-                    padding: 12,
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    background: "var(--surface-subtle)",
-                    minHeight: 48,
-                    whiteSpace: "pre-wrap",
-                  }}
-                />
+                  {latexHasSource && (
+                    <div
+                      ref={latexPreviewRef}
+                      style={{
+                        marginTop: 8,
+                        padding: 12,
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        background: "var(--surface-subtle)",
+                        minHeight: 48,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    />
+                  )}
+                </>
               )}
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolOcr")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
                 {t("uploadImage")}
               </div>
               <div
-                className="dropzone"
-                tabIndex={0}
-                role="button"
-                onDrop={handleOcrDrop}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }}
-                onPaste={handleOcrPaste}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setOcrPasteActive(true);
-                  setOcrContextMenu({ x: e.clientX, y: e.clientY });
-                }}
-                onMouseEnter={() => setOcrPasteActive(true)}
-                onMouseLeave={() => setOcrPasteActive(false)}
-                onFocus={() => setOcrPasteActive(true)}
-                onFocusCapture={() => setOcrPasteActive(true)}
-                onBlur={() => setOcrPasteActive(false)}
-                onBlurCapture={() => setOcrPasteActive(false)}
+                className="row"
+                style={{ justifyContent: "flex-end", marginTop: 4 }}
               >
-                <div
-                  className="row"
-                  style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => toggleTool("ocr")}
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    ref={ocrFileInputRef}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) await onAddOcrImage(file);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button onClick={() => ocrFileInputRef.current?.click()}>
-                    {t("browse")}
-                  </button>
-                </div>
-                <div
-                  className="row"
-                  style={{
-                    justifyContent: "center",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginTop: 8,
-                  }}
-                >
-                  <span className="small">{t("dragDropOrPaste")}</span>
-                  <span className="small">{t("rightClickForPaste")}</span>
-                  {ocrDisplayName && (
-                    <span className="small">
-                      {t("generatedNameLabel")}: {ocrDisplayName}
-                    </span>
-                  )}
-                </div>
+                  {toolCollapse.ocr ? t("expandSection") : t("collapseSection")}
+                </button>
               </div>
-              {ocrContextMenu && (
-                <div
-                  style={{
-                    position: "fixed",
-                    top: ocrContextMenu.y,
-                    left: ocrContextMenu.x,
-                    zIndex: 9999,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.18)",
-                    padding: 8,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <button
-                    onClick={async (event) => {
-                      event.stopPropagation();
-                      try {
-                        const files = await readClipboardFiles((mime) =>
-                          mime.startsWith("image/"),
-                        );
-                        if (!files.length) {
-                          alert(t("noFilesFromClipboard"));
-                        } else {
-                          await onAddOcrImage(files[0]);
-                        }
-                      } catch (error) {
-                        handleOcrClipboardError(error);
-                      } finally {
-                        setOcrContextMenu(null);
-                      }
+              {!toolCollapse.ocr && (
+                <>
+                  <div
+                    className="dropzone"
+                    tabIndex={0}
+                    role="button"
+                    onDrop={handleOcrDrop}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
                     }}
+                    onPaste={handleOcrPaste}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setOcrPasteActive(true);
+                      setOcrContextMenu({ x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseEnter={() => setOcrPasteActive(true)}
+                    onMouseLeave={() => setOcrPasteActive(false)}
+                    onFocus={() => setOcrPasteActive(true)}
+                    onFocusCapture={() => setOcrPasteActive(true)}
+                    onBlur={() => setOcrPasteActive(false)}
+                    onBlurCapture={() => setOcrPasteActive(false)}
                   >
-                    {t("pasteFromClipboard")}
-                  </button>
-                </div>
-              )}
-              {ocrPreviewUrl && (
-                <div style={{ marginTop: 8 }}>
+                    <div
+                      className="row"
+                      style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        ref={ocrFileInputRef}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) await onAddOcrImage(file);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button onClick={() => ocrFileInputRef.current?.click()}>
+                        {t("browse")}
+                      </button>
+                    </div>
+                    <div
+                      className="row"
+                      style={{
+                        justifyContent: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 8,
+                      }}
+                    >
+                      <span className="small">{t("dragDropOrPaste")}</span>
+                      <span className="small">{t("rightClickForPaste")}</span>
+                      {ocrDisplayName && (
+                        <span className="small">
+                          {t("generatedNameLabel")}: {ocrDisplayName}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {ocrContextMenu && (
+                    <div
+                      style={{
+                        position: "fixed",
+                        top: ocrContextMenu.y,
+                        left: ocrContextMenu.x,
+                        zIndex: 9999,
+                        background: "var(--surface)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        boxShadow: "0 10px 24px rgba(15, 23, 42, 0.18)",
+                        padding: 8,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        onClick={async (event) => {
+                          event.stopPropagation();
+                          try {
+                            const files = await readClipboardFiles((mime) =>
+                              mime.startsWith("image/"),
+                            );
+                            if (!files.length) {
+                              alert(t("noFilesFromClipboard"));
+                            } else {
+                              await onAddOcrImage(files[0]);
+                            }
+                          } catch (error) {
+                            handleOcrClipboardError(error);
+                          } finally {
+                            setOcrContextMenu(null);
+                          }
+                        }}
+                      >
+                        {t("pasteFromClipboard")}
+                      </button>
+                    </div>
+                  )}
+                  {ocrPreviewUrl && (
+                    <div style={{ marginTop: 8 }}>
+                      <div
+                        className="row"
+                        style={{ justifyContent: "flex-end", marginBottom: 6 }}
+                      >
+                        <button onClick={() => openViewer(ocrPreviewUrl)}>
+                          {t("viewLarge")}
+                        </button>
+                      </div>
+                      <img className="preview" src={ocrPreviewUrl} />
+                    </div>
+                  )}
                   <div
                     className="row"
-                    style={{ justifyContent: "flex-end", marginBottom: 6 }}
+                    style={{ marginTop: 8, gap: 8, alignItems: "center" }}
                   >
-                    <button onClick={() => openViewer(ocrPreviewUrl)}>
-                      {t("viewLarge")}
-                    </button>
+                    <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                      <button onClick={runOCR}>{t("ocrExtract")}</button>
+                      {llmStatusSource === "ocr" &&
+                        llmStatus !== "idle" &&
+                        llmStatus !== "done" && (
+                          <span className="small">
+                            {llmStatus === "waiting_response"
+                              ? t("waitingLLMResponse")
+                              : t("waitingLLMThinking")}
+                            {dotPattern}
+                          </span>
+                        )}
+                    </div>
+                    <button onClick={applyOcrText}>{t("confirmText")}</button>
                   </div>
-                  <img className="preview" src={ocrPreviewUrl} />
-                </div>
-              )}
-
-              <div
-                className="row"
-                style={{ marginTop: 8, gap: 8, alignItems: "center" }}
-              >
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button onClick={runOCR}>{t("ocrExtract")}</button>
-                  {llmStatusSource === "ocr" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
-                </div>
-                <button onClick={applyOcrText}>{t("confirmText")}</button>
-              </div>
-              {ocrText && (
-                <textarea
-                  style={{ marginTop: 8 }}
-                  value={ocrText}
-                  onChange={(e) => setOcrText(e.target.value)}
-                />
+                  {ocrText && (
+                    <textarea
+                      style={{ marginTop: 8 }}
+                      value={ocrText}
+                      onChange={(e) => setOcrText(e.target.value)}
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>

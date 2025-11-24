@@ -1,6 +1,8 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 
+const FORMAT_FIX_RETRY_LIMIT = 3;
+
 export interface ParsedGeneratedQuestion {
   question: string;
   questionType: string;
@@ -311,6 +313,20 @@ export class LLMGenerationError extends Error {
   }
 }
 
+const buildFormatFixPrompt = (errorMessage: string, rawResponse: string): string => {
+  const lines: string[] = [];
+  lines.push('Your previous reply could not be parsed by our structured data validator.');
+  lines.push('');
+  lines.push('### Parser error');
+  lines.push(errorMessage.trim() || '(unspecified)');
+  lines.push('');
+  lines.push('### Your previous reply (for reference)');
+  lines.push(rawResponse.trim() || '(empty)');
+  lines.push('');
+  lines.push('Please resend the full output in the exact format described earlier: include both the <Thinking> and <Generated Question> blocks, fill every required field, and ensure the Generated Question block lists Question, Options (or "(none)" only for non-multiple-choice), and Answer with valid content. Do not add extra commentary.');
+  return lines.join('\n');
+};
+
 export async function generateProblemFromText(
   input: string,
   existing: ProblemRecord,
@@ -480,88 +496,115 @@ export async function generateProblemFromText(
 
   const user = userLines.join('\n');
 
-  const raw = await chatStream([
+  const baseMessages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: user }
-  ], agent.config, { temperature: 0.2 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
+  ];
 
-  const generatedSection = extractTagContent(raw, 'Generated Question');
-  if (!generatedSection) {
-    console.error('Generated Question block missing', raw);
-    throw new LLMGenerationError('Generated Question block missing', raw);
-  }
+  const handlers = options?.onStatus ? { onStatus: options.onStatus } : undefined;
 
-  const extracted = parseGeneratedQuestionContent(generatedSection);
+  const tryBuildResult = (rawResponse: string) => {
+    const generatedSection = extractTagContent(rawResponse, 'Generated Question');
+    if (!generatedSection) {
+      console.error('Generated Question block missing', rawResponse);
+      throw new LLMGenerationError('Generated Question block missing', rawResponse);
+    }
 
-  const sanitizeText = (value: string): string => {
-    if (!value) return '';
-    const trimmed = value.trim();
-    if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return '';
-    return trimmed;
+    const extracted = parseGeneratedQuestionContent(generatedSection);
+
+    const sanitizeText = (value: string): string => {
+      if (!value) return '';
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return '';
+      return trimmed;
+    };
+
+    const allowedQuestionTypes: ProblemRecord['questionType'][] = ['Multiple Choice', 'Fill-in-the-blank', 'Proof'];
+    const llmQuestionTypeRaw = sanitizeText(extracted.questionType);
+    const questionType: ProblemRecord['questionType'] = allowedQuestionTypes.includes(llmQuestionTypeRaw as ProblemRecord['questionType'])
+      ? (llmQuestionTypeRaw as ProblemRecord['questionType'])
+      : targetType;
+
+    const questionCandidate = sanitizeText(extracted.question);
+    const question = questionCandidate || existingQuestion || baseInput;
+
+    const llmOptions = extracted.options
+      .map((option) => sanitizeText(option))
+      .filter((option) => option.length > 0);
+
+    const normalizedOptions = questionType === 'Multiple Choice'
+      ? Array.from({ length: expectedOptionsCount }, (_, idx) => {
+          const llmValue = llmOptions[idx];
+          if (llmValue) return llmValue;
+          const existingValue = existingOptionsNormalized[idx]?.trim();
+          return existingValue || '';
+        })
+      : [];
+
+    let answer = sanitizeText(extracted.answer);
+    if (!answer) {
+      answer = existingAnswer || '';
+    }
+
+    const fallbackSubfield = defaults.subfieldOptions[0] ?? 'Others';
+    const subfield = sanitizeText(extracted.subfield) || existingSubfield || fallbackSubfield;
+
+    const fallbackAcademic = defaults.academicLevels[0] ?? 'K12';
+    const academicLevel = sanitizeText(extracted.academicLevel) || existingAcademic || fallbackAcademic;
+
+    const fallbackDifficulty = defaults.difficultyOptions[0] ?? '1';
+    const difficultyCandidate = sanitizeText(extracted.difficulty);
+    const difficulty = difficultyCandidate || existingDifficulty || fallbackDifficulty;
+
+    const patch: Partial<ProblemRecord> = {
+      question,
+      questionType,
+      options: normalizedOptions,
+      answer,
+      subfield,
+      academicLevel,
+      difficulty
+    };
+    const missing: string[] = [];
+    if (!question) missing.push('question');
+    if (!questionType) missing.push('questionType');
+    if (!answer) missing.push('answer');
+    if (!subfield) missing.push('subfield');
+    if (!academicLevel) missing.push('academicLevel');
+    if (!difficulty) missing.push('difficulty');
+    if (questionType === 'Multiple Choice' && normalizedOptions.some((opt) => !opt || !opt.trim())) {
+      missing.push('options');
+    }
+    if (missing.length > 0) {
+      const message = `Failed to parse LLM response: missing or invalid fields: ${missing.join(', ')}`;
+      throw new LLMGenerationError(message, rawResponse);
+    }
+
+    return { patch, raw: rawResponse, generatedBlock: generatedSection, parsed: extracted };
   };
 
-  const allowedQuestionTypes: ProblemRecord['questionType'][] = ['Multiple Choice', 'Fill-in-the-blank', 'Proof'];
-  const llmQuestionTypeRaw = sanitizeText(extracted.questionType);
-  const questionType: ProblemRecord['questionType'] = allowedQuestionTypes.includes(llmQuestionTypeRaw as ProblemRecord['questionType'])
-    ? (llmQuestionTypeRaw as ProblemRecord['questionType'])
-    : targetType;
+  let raw = await chatStream(baseMessages, agent.config, { temperature: 0.2 }, handlers);
 
-  const questionCandidate = sanitizeText(extracted.question);
-  const question = questionCandidate || existingQuestion || baseInput;
-
-  const llmOptions = extracted.options
-    .map((option) => sanitizeText(option))
-    .filter((option) => option.length > 0);
-
-  const normalizedOptions = questionType === 'Multiple Choice'
-    ? Array.from({ length: expectedOptionsCount }, (_, idx) => {
-        const llmValue = llmOptions[idx];
-        if (llmValue) return llmValue;
-        const existingValue = existingOptionsNormalized[idx]?.trim();
-        return existingValue || '';
-      })
-    : [];
-
-  let answer = sanitizeText(extracted.answer);
-  if (!answer) {
-    answer = existingAnswer || '';
+  for (let fixAttempt = 0; fixAttempt <= FORMAT_FIX_RETRY_LIMIT; fixAttempt += 1) {
+    try {
+      return tryBuildResult(raw);
+    } catch (err) {
+      const isParseError = err instanceof LLMGenerationError;
+      const hasRetriesLeft = fixAttempt < FORMAT_FIX_RETRY_LIMIT;
+      if (!isParseError || !hasRetriesLeft) {
+        throw err;
+      }
+      const fixPrompt = buildFormatFixPrompt(err.message, raw);
+      const fixMessages = [
+        ...baseMessages,
+        { role: 'assistant', content: raw },
+        { role: 'user', content: fixPrompt }
+      ];
+      raw = await chatStream(fixMessages, agent.config, { temperature: 0 }, handlers);
+    }
   }
 
-  const fallbackSubfield = defaults.subfieldOptions[0] ?? 'Others';
-  const subfield = sanitizeText(extracted.subfield) || existingSubfield || fallbackSubfield;
-
-  const fallbackAcademic = defaults.academicLevels[0] ?? 'K12';
-  const academicLevel = sanitizeText(extracted.academicLevel) || existingAcademic || fallbackAcademic;
-
-  const fallbackDifficulty = defaults.difficultyOptions[0] ?? '1';
-  const difficultyCandidate = sanitizeText(extracted.difficulty);
-  const difficulty = difficultyCandidate || existingDifficulty || fallbackDifficulty;
-
-  const patch: Partial<ProblemRecord> = {
-    question,
-    questionType,
-    options: normalizedOptions,
-    answer,
-    subfield,
-    academicLevel,
-    difficulty
-  };
-  const missing: string[] = [];
-  if (!question) missing.push('question');
-  if (!questionType) missing.push('questionType');
-  if (!answer) missing.push('answer');
-  if (!subfield) missing.push('subfield');
-  if (!academicLevel) missing.push('academicLevel');
-  if (!difficulty) missing.push('difficulty');
-  if (questionType === 'Multiple Choice' && normalizedOptions.some((opt) => !opt || !opt.trim())) {
-    missing.push('options');
-  }
-  if (missing.length > 0) {
-    const message = `Failed to parse LLM response: missing or invalid fields: ${missing.join(', ')}`;
-    throw new LLMGenerationError(message, raw);
-  }
-
-  return { patch, raw, generatedBlock: generatedSection, parsed: extracted };
+  throw new LLMGenerationError('Failed to repair malformed LLM response after multiple attempts.', raw);
 }
 
 const parseReviewerJson = (raw: string): { status?: string; issues?: unknown; feedback?: unknown } | null => {

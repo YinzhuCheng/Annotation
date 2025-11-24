@@ -69,6 +69,8 @@ const resources = {
       importXlsxFolder: 'Import XLSX (Folder)',
       importSuccess: 'Imported successfully, total {{count}} rows',
       importXlsxHint: 'Drag & drop .xlsx files to import. Right-click or press Ctrl+V to paste.',
+      importFirstRowPreviewLabel: 'First row preview',
+      importFirstRowPreviewEmpty: 'Question is empty',
       importImages: 'Import Images',
       importImagesHint: 'Drag & drop image folders to import (filenames must be ID.xxx). Right-click or press Ctrl+V to paste.',
       importImagesSuccess: 'Imported images successfully, total {{count}} images',
@@ -92,6 +94,8 @@ const resources = {
       helpError: 'Help content failed to render. Please close this dialog.',
       newProblem: 'New Problem',
       saveProblem: 'Save Problem',
+      deleteProblemButton: 'Delete Problem',
+      confirmDeleteProblem: 'Are you sure you want to delete this problem? Please export it locally before deleting.',
       previewProblem: 'Preview Problem',
       previewTitle: 'Problem Preview',
       previewFieldId: 'Problem_Id',
@@ -122,6 +126,15 @@ const resources = {
       assistToolGenerator: 'LLM-assisted problem generation',
       assistToolGeneratorHint: 'Let the generator rephrase the current draft to match the selected problem type, add missing definitions, and autofill structured fields.',
       assistToolGeneratorAction: 'Run generation',
+      qaAssistantTitle: 'Problem Q&A assistant',
+      qaAssistantHint: 'Ask clarifying questions about the current problem. The assistant references the existing fields but never rewrites the draft.',
+      qaAssistantInputPlaceholder: 'Ask in any language; the reply will mirror your wording.',
+      qaAssistantSend: 'Send question',
+      qaAssistantClear: 'Clear conversation',
+      qaAssistantEmpty: 'No Q&A yet. Ask whether the answer is correct, what concepts it covers, or any other detail.',
+      qaAssistantError: 'Q&A error: {{message}}',
+      qaAssistantUserLabel: 'You',
+      qaAssistantAgentLabel: 'Assistant',
       assistToolTranslation: 'Translation assistant',
       assistToolOcr: 'Image text extraction',
       assistToolLatex: 'MathJax correction',
@@ -154,6 +167,7 @@ const resources = {
         reviewerForcedAcceptShort: 'forced accept',
       llmConversationHistory: 'Conversation history',
       llmConversationHistoryHint: 'Previous prompts, model replies, and saved feedback are sent to the generator to refine future results.',
+      llmConversationHistoryEmpty: 'No LLM runs yet. Add feedback now to guide the first generation.',
       llmTurnLabel: 'Round {{index}}',
       llmPromptLabel: 'Prompt',
       llmResponseLabel: 'Model reply',
@@ -206,6 +220,8 @@ const resources = {
         , agentReviewerDesc: 'Audits questions for clarity, unique answers, and formatting compliance.'
       , agentTranslator: 'Translation Agent'
       , agentTranslatorDesc: 'Translates questions or answers between English and Chinese.'
+      , agentQa: 'Problem Q&A Agent'
+      , agentQaDesc: 'Answers clarifying questions about the current problem without modifying it.'
       , agentEditPrompt: 'Set Prompt'
       , agentCopyPlaceholder: 'Copy config from…'
       , agentPromptEditorTitle: 'Edit prompt for {{agent}}'
@@ -305,6 +321,8 @@ const resources = {
       importXlsxFolder: '导入 XLSX（文件夹）',
       importSuccess: '读取成功，共{{count}}条数据',
       importXlsxHint: '拖拽 .xlsx 文件导入，支持右键或 Ctrl+V 粘贴',
+      importFirstRowPreviewLabel: '首条数据预览',
+      importFirstRowPreviewEmpty: '题干为空',
       importImages: '导入图片',
       importImagesHint: '仅支持拖拽图片文件夹导入（文件名需为 ID.xxx），支持右键或 Ctrl+V 粘贴',
       importImagesSuccess: '读取成功，共{{count}}张图片',
@@ -328,6 +346,8 @@ const resources = {
       helpError: '帮助内容渲染失败，请关闭此对话框。',
       newProblem: '新建题目',
       saveProblem: '保存题目',
+      deleteProblemButton: '删除题目',
+      confirmDeleteProblem: '确认删除当前题目吗？建议删除前先导出到本地。',
       collapseSection: '收起',
       expandSection: '展开',
       selectSubfieldHint: '可多次选择多个分支领域，最终以分号拼接。',
@@ -358,6 +378,15 @@ const resources = {
       assistToolGenerator: 'LLM辅助问题生成',
       assistToolGeneratorHint: '引导大语言模型重写题干、补全结构化字段并保持目标题型一致。',
       assistToolGeneratorAction: '运行生成',
+      qaAssistantTitle: '针对当前问题提问',
+      qaAssistantHint: '围绕当前题目发问，助手会参考已填字段回答，但不会改写题干。',
+      qaAssistantInputPlaceholder: '使用任意语言提问（回复会保持相同语言）…',
+      qaAssistantSend: '发送问题',
+      qaAssistantClear: '清空对话',
+      qaAssistantEmpty: '尚无提问，可以先询问题目是否正确、涉及哪些知识点等。',
+      qaAssistantError: '问答出错：{{message}}',
+      qaAssistantUserLabel: '你',
+      qaAssistantAgentLabel: '助手',
       assistToolTranslation: '翻译助手',
       assistToolOcr: '图片提取文字',
       assistToolLatex: 'LaTeX渲染',
@@ -390,6 +419,7 @@ const resources = {
         reviewerForcedAcceptShort: '强制放行',
       llmConversationHistory: '多轮会话记录',
       llmConversationHistoryHint: '历史提问、模型回复和用户反馈会一并传递给 LLM，帮助改进下一轮生成。',
+      llmConversationHistoryEmpty: '尚未运行 LLM，可先写下反馈为首轮生成提供指引。',
       llmTurnLabel: '第 {{index}} 轮',
       llmPromptLabel: '提问',
       llmResponseLabel: '模型回复',
@@ -442,6 +472,8 @@ const resources = {
         , agentReviewerDesc: '对生成结果进行质检，确保描述清晰、答案唯一且格式符合规范。'
       , agentTranslator: '翻译代理'
       , agentTranslatorDesc: '用于在中英文之间转换题目或答案。'
+      , agentQa: '问题问答代理'
+      , agentQaDesc: '针对当前题目回答追问，不会修改题干。'
       , agentEditPrompt: '设置提示词'
       , agentCopyPlaceholder: '从其他代理复制配置…'
       , agentPromptEditorTitle: '编辑 {{agent}} 的提示词'
