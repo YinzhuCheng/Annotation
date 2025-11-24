@@ -322,7 +322,7 @@ export class LLMGenerationError extends Error {
   }
 }
 
-const buildFormatFixPrompt = (errorMessage: string, rawResponse: string): string => {
+const buildFormatFixPrompt = (errorMessage: string, rawResponse: string, outputTemplate: string): string => {
   const lines: string[] = [];
   lines.push('Your previous reply could not be parsed by our structured data validator.');
   lines.push('');
@@ -331,6 +331,9 @@ const buildFormatFixPrompt = (errorMessage: string, rawResponse: string): string
   lines.push('');
   lines.push('### Your previous reply (for reference)');
   lines.push(rawResponse.trim() || '(empty)');
+  lines.push('');
+  lines.push('### Required Output Format');
+  lines.push(outputTemplate.trim());
   lines.push('');
   lines.push('Please resend the full output in the exact format described earlier: include both the <Thinking> and <Generated Question> blocks, fill every required field, and ensure the Generated Question block lists Question, Options (or "(none)" only for non-multiple-choice), and Answer with valid content. Do not add extra commentary.');
   return lines.join('\n');
@@ -453,35 +456,38 @@ export async function generateProblemFromText(
 
   userLines.push('## Output Contract');
   userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
-  userLines.push('<Thinking>{{');
-  userLines.push('Analysis:');
-  userLines.push('1. Feedback alignment - <list how each feedback item will be satisfied, or state that there is no prior feedback>');
-  userLines.push('2. Mathematical study - <summarize the core ideas, invariants, and solution path of the source problem>');
-  userLines.push('3. Adaptation plan - <describe how the final task will match the target type while preserving the key concept>');
-  userLines.push('}}</Thinking>');
-  userLines.push('');
-  userLines.push('<Generated Question>{{');
-  userLines.push(`questionType: ${targetType}`);
-  userLines.push('subfield: <value from allowed list or "Others: ...">');
-  userLines.push('academicLevel: <value from allowed list>');
-  userLines.push('difficulty: <value from allowed list>');
-  userLines.push('');
-  userLines.push('Question:');
-  userLines.push('<final question text>');
-  userLines.push('');
+  const outputTemplateLines: string[] = [];
+  outputTemplateLines.push('<Thinking>{{');
+  outputTemplateLines.push('Analysis:');
+  outputTemplateLines.push('1. Feedback alignment - <describe how you will satisfy each feedback item or state that none exist>');
+  outputTemplateLines.push('2. Mathematical study - <summarize the core mathematical ideas, invariants, and solution path>');
+  outputTemplateLines.push('3. Adaptation plan - <explain how the final task will match the target type while preserving the core concept>');
+  outputTemplateLines.push('}}</Thinking>');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('<Generated Question>{{');
+  outputTemplateLines.push('questionType: <target type>');
+  outputTemplateLines.push('subfield: <value from allowed list or "Others: short descriptor">');
+  outputTemplateLines.push('academicLevel: <value from allowed list>');
+  outputTemplateLines.push('difficulty: <value from allowed list>');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('Question:');
+  outputTemplateLines.push('<final question text written in English>');
+  outputTemplateLines.push('');
   if (targetType === 'Multiple Choice') {
-    userLines.push('Options:');
+    outputTemplateLines.push('Options:');
     optionLabels.forEach((label) => {
-      userLines.push(`${label}) <option text>`);
+      outputTemplateLines.push(`${label}) <option text in English>`);
     });
   } else {
-    userLines.push('Options: (none)');
+    outputTemplateLines.push('Options: (none)');
   }
-  userLines.push('');
-  userLines.push('Answer:');
-  userLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
-  userLines.push('}}</Generated Question>');
-  userLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, and do not add any text after </Generated Question>.');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('Answer:');
+  outputTemplateLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
+  outputTemplateLines.push('}}</Generated Question>');
+  outputTemplateLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, write all narrative text in English, and do not add any text after </Generated Question>.');
+  const outputTemplate = outputTemplateLines.join('\n');
+  userLines.push(...outputTemplateLines);
 
   if (conversation.length > 0) {
     userLines.push('');
@@ -604,7 +610,7 @@ export async function generateProblemFromText(
       if (!isParseError || !hasRetriesLeft) {
         throw err;
       }
-      const fixPrompt = buildFormatFixPrompt(err.message, raw);
+      const fixPrompt = buildFormatFixPrompt(err.message, raw, outputTemplate);
       const fixMessages = [
         ...baseMessages,
         { role: 'assistant', content: raw },
@@ -687,10 +693,8 @@ export async function reviewGeneratedQuestion(
   const optionLines = normalizedOptions.map((opt, idx) => `${String.fromCharCode(65 + idx)}. ${opt}`);
 
   const guidelines: string[] = [];
-  guidelines.push('1. Clarity: the question must be understandable, contain no undefined terminology, and avoid ambiguous phrasing.');
-  guidelines.push('2. Multiple Choice validation: ensure options are distinct, the stated answer maps to exactly one option label, and no other option obviously shares the same truth value.');
-  guidelines.push('3. Formatting & MathJax: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer), and every mathematical expression must be valid MathJax (no unsupported environments or Markdown fences).');
-  guidelines.push('4. Language: all narrative content, labels, and explanations must be written in English; flag any non-English words (aside from standard mathematical symbols).');
+  guidelines.push('1. Problem coherence: the prompt must be internally consistent, define or reference every concept it uses, avoid contradictory statements, and omit redundant or impossible conditions.');
+  guidelines.push('2. Answer correctness: the stated answer must be correct and uniquely determined by the question. For Multiple Choice, exactly one option must be correct and the Answer line must reference that option; for Fill-in-the-blank, the answer must satisfy the condition implied by the blank; for Proof, the reasoning must logically establish the claim.');
   guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
 
   const lines: string[] = [];
