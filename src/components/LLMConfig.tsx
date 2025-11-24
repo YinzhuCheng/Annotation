@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { chatStream } from '../lib/llmAdapter';
 import { useAppStore } from '../state/store';
-import type { AgentId, LLMAgentSettings } from '../state/store';
+import type { AgentId, LLMAgentSettings, LLMConfigState } from '../state/store';
 
 const PROVIDERS: Array<{ value: LLMAgentSettings['config']['provider']; labelKey: string }> = [
   { value: 'openai', labelKey: 'provider_openai' },
@@ -28,6 +28,8 @@ export function LLMConfig() {
   const { t } = useTranslation();
   const agents = useAppStore((s) => s.llmAgents);
   const saveAgentSettings = useAppStore((s) => s.saveAgentSettings);
+  const overallDraftConfig = useAppStore((s) => s.overallDraftConfig);
+  const setOverallDraftConfig = useAppStore((s) => s.setOverallDraftConfig);
 
   const [drafts, setDrafts] = useState<Record<AgentId, LLMAgentSettings>>(() => cloneAgentsState(agents));
   const [savedAt, setSavedAt] = useState<Record<AgentId, number | null>>({
@@ -97,32 +99,14 @@ export function LLMConfig() {
 
   const overallConfig = useMemo(() => {
     const ids = agentIds.length > 0 ? agentIds : (['generator'] as AgentId[]);
-    const firstId = ids[0];
-    const base: LLMAgentSettings['config'] = drafts[firstId]?.config ?? { provider: 'openai', apiKey: '', model: '', baseUrl: '' };
-    const result: LLMAgentSettings['config'] = { ...base };
-    const fields: Array<keyof LLMAgentSettings['config']> = ['provider', 'apiKey', 'model', 'baseUrl'];
-    let unified = true;
-    for (const field of fields) {
-      const firstValue = drafts[firstId]?.config[field] ?? base[field];
-      const same = ids.every((id) => drafts[id]?.config[field] === firstValue);
-      if (!same) unified = false;
-      result[field] = firstValue as LLMAgentSettings['config'][keyof LLMAgentSettings['config']];
-    }
-    return { config: result, unified };
-  }, [agentIds, drafts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('llm-overall-draft', JSON.stringify(overallConfig.config));
-    } catch {
-      // ignore storage quota errors
-    }
-  }, [
-    overallConfig.config.provider,
-    overallConfig.config.apiKey,
-    overallConfig.config.model,
-    overallConfig.config.baseUrl
-  ]);
+    const fields: Array<keyof LLMConfigState> = ['provider', 'apiKey', 'model', 'baseUrl'];
+    const unified = ids.every((id) => {
+      const cfg = drafts[id]?.config;
+      if (!cfg) return false;
+      return fields.every((field) => cfg[field] === overallDraftConfig[field]);
+    });
+    return { config: overallDraftConfig, unified };
+  }, [agentIds, drafts, overallDraftConfig]);
 
   const handleConfigChange = (id: AgentId, field: keyof LLMAgentSettings['config'], value: string) => {
     setDrafts((prev) => ({
@@ -135,6 +119,7 @@ export function LLMConfig() {
   };
 
   const handleOverallChange = <K extends keyof LLMAgentSettings['config']>(field: K, value: LLMAgentSettings['config'][K]) => {
+    setOverallDraftConfig({ [field]: value });
     setDrafts((prev) => {
       const next = { ...prev } as Record<AgentId, LLMAgentSettings>;
       agentIds.forEach((id) => {

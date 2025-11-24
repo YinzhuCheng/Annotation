@@ -1,7 +1,16 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
+import type { ChatContent, ImageUrlContent } from './llmAdapter';
 
 const FORMAT_FIX_RETRY_LIMIT = 3;
+
+const composeChatContent = (text: string, attachment?: ImageUrlContent | null): ChatContent => {
+  if (!attachment) return text;
+  return [
+    { type: 'text', text },
+    { type: 'image_url', image_url: { url: attachment.image_url.url } }
+  ];
+};
 
 export interface ParsedGeneratedQuestion {
   question: string;
@@ -84,6 +93,47 @@ const cleanOptionText = (fragment: string): string | null => {
     return body || labeled[1];
   }
   return text;
+};
+
+const parseOptionsBlock = (block: string): string[] => {
+  const lines = block.split(/\n/);
+  const labelRegex = /^([A-Z])[)\.\-:]\s*(.*)$/;
+  const results: string[] = [];
+  let currentLines: string[] = [];
+  const flush = () => {
+    if (currentLines.length === 0) return;
+    const joined = currentLines.join('\n').trim();
+    if (joined.length > 0) {
+      results.push(joined);
+    }
+    currentLines = [];
+  };
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      if (currentLines.length > 0) {
+        currentLines.push('');
+      }
+      continue;
+    }
+    const labelMatch = trimmed.match(labelRegex);
+    if (labelMatch) {
+      flush();
+      const body = labelMatch[2]?.trim() ?? '';
+      currentLines = body ? [body] : [];
+      if (!body) {
+        currentLines = [];
+      }
+      continue;
+    }
+    if (currentLines.length === 0) {
+      currentLines = [trimmed];
+    } else {
+      currentLines.push(trimmed);
+    }
+  }
+  flush();
+  return results;
 };
 
 const addOptionFragment = (fragment: string, target: string[]) => {
@@ -258,8 +308,13 @@ const parseGeneratedQuestionContent = (content: string): ParsedGeneratedQuestion
   } else if (optionsSection.length > 0) {
     const block = optionsSection.join('\n').replace(/\r/g, '').trim();
     if (block && !/^\(none\)$/i.test(block)) {
-      const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
-      segments.forEach((segment) => addOptionFragment(segment, options));
+      const parsedByLine = parseOptionsBlock(block);
+      if (parsedByLine.length > 0) {
+        parsedByLine.forEach((segment) => options.push(segment));
+      } else {
+        const segments = block.split(/(?=[A-Z][)\.-:])/).map((part) => part.trim()).filter(Boolean);
+        segments.forEach((segment) => addOptionFragment(segment, options));
+      }
       if (options.length === 0) {
         parseOptionValue(block, options);
       }
@@ -313,7 +368,7 @@ export class LLMGenerationError extends Error {
   }
 }
 
-const buildFormatFixPrompt = (errorMessage: string, rawResponse: string): string => {
+const buildFormatFixPrompt = (errorMessage: string, rawResponse: string, outputTemplate: string): string => {
   const lines: string[] = [];
   lines.push('Your previous reply could not be parsed by our structured data validator.');
   lines.push('');
@@ -322,6 +377,9 @@ const buildFormatFixPrompt = (errorMessage: string, rawResponse: string): string
   lines.push('');
   lines.push('### Your previous reply (for reference)');
   lines.push(rawResponse.trim() || '(empty)');
+  lines.push('');
+  lines.push('### Required Output Format');
+  lines.push(outputTemplate.trim());
   lines.push('');
   lines.push('Please resend the full output in the exact format described earlier: include both the <Thinking> and <Generated Question> blocks, fill every required field, and ensure the Generated Question block lists Question, Options (or "(none)" only for non-multiple-choice), and Answer with valid content. Do not add extra commentary.');
   return lines.join('\n');
@@ -335,6 +393,7 @@ export async function generateProblemFromText(
   options?: {
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
     conversation?: GeneratorConversationTurn[];
+    imageAttachment?: ImageUrlContent | null;
   }
 ): Promise<{ patch: Partial<ProblemRecord>; raw: string; generatedBlock: string; parsed: ParsedGeneratedQuestion }> {
   const baseInput = input.trim();
@@ -442,36 +501,39 @@ export async function generateProblemFromText(
   userLines.push('');
 
   userLines.push('## Output Contract');
-  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content.');
-  userLines.push('<Thinking>{{');
-  userLines.push('Analysis:');
-  userLines.push('1. Feedback alignment - <list how each feedback item will be satisfied, or state that there is no prior feedback>');
-  userLines.push('2. Mathematical study - <summarize the core ideas, invariants, and solution path of the source problem>');
-  userLines.push('3. Adaptation plan - <describe how the final task will match the target type while preserving the key concept>');
-  userLines.push('}}</Thinking>');
-  userLines.push('');
-  userLines.push('<Generated Question>{{');
-  userLines.push(`questionType: ${targetType}`);
-  userLines.push('subfield: <value from allowed list or "Others: ...">');
-  userLines.push('academicLevel: <value from allowed list>');
-  userLines.push('difficulty: <value from allowed list>');
-  userLines.push('');
-  userLines.push('Question:');
-  userLines.push('<final question text>');
-  userLines.push('');
+  userLines.push('Reply with exactly the two blocks shown below and no extra commentary. Leave a blank line between </Thinking> and <Generated Question>. Replace every placeholder with real content. In the Options section, list each choice on its own line starting with its label (e.g., "A) ...").');
+  const outputTemplateLines: string[] = [];
+  outputTemplateLines.push('<Thinking>{{');
+  outputTemplateLines.push('Analysis:');
+  outputTemplateLines.push('1. Feedback alignment - <describe how you will satisfy each feedback item or state that none exist>');
+  outputTemplateLines.push('2. Mathematical study - <summarize the core mathematical ideas, invariants, and solution path>');
+  outputTemplateLines.push('3. Adaptation plan - <explain how the final task will match the target type while preserving the core concept>');
+  outputTemplateLines.push('}}</Thinking>');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('<Generated Question>{{');
+  outputTemplateLines.push('questionType: <target type>');
+  outputTemplateLines.push('subfield: <value from allowed list or "Others: short descriptor">');
+  outputTemplateLines.push('academicLevel: <value from allowed list>');
+  outputTemplateLines.push('difficulty: <value from allowed list>');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('Question:');
+  outputTemplateLines.push('<final question text written in English>');
+  outputTemplateLines.push('');
   if (targetType === 'Multiple Choice') {
-    userLines.push('Options:');
+    outputTemplateLines.push('Options:');
     optionLabels.forEach((label) => {
-      userLines.push(`${label}) <option text>`);
+      outputTemplateLines.push(`${label}) <option text in English on its own line>`);
     });
   } else {
-    userLines.push('Options: (none)');
+    outputTemplateLines.push('Options: (none)');
   }
-  userLines.push('');
-  userLines.push('Answer:');
-  userLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
-  userLines.push('}}</Generated Question>');
-  userLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, and do not add any text after </Generated Question>.');
+  outputTemplateLines.push('');
+  outputTemplateLines.push('Answer:');
+  outputTemplateLines.push('<final answer (letter for Multiple Choice, full text otherwise)>');
+  outputTemplateLines.push('}}</Generated Question>');
+  outputTemplateLines.push('Formatting notes: replace all <...> placeholders, keep option labels sequential when required, write all narrative text in English, and do not add any text after </Generated Question>.');
+  const outputTemplate = outputTemplateLines.join('\n');
+  userLines.push(...outputTemplateLines);
 
   if (conversation.length > 0) {
     userLines.push('');
@@ -498,7 +560,7 @@ export async function generateProblemFromText(
 
   const baseMessages = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: user }
+    { role: 'user', content: composeChatContent(user, options?.imageAttachment) }
   ];
 
   const handlers = options?.onStatus ? { onStatus: options.onStatus } : undefined;
@@ -594,7 +656,7 @@ export async function generateProblemFromText(
       if (!isParseError || !hasRetriesLeft) {
         throw err;
       }
-      const fixPrompt = buildFormatFixPrompt(err.message, raw);
+      const fixPrompt = buildFormatFixPrompt(err.message, raw, outputTemplate);
       const fixMessages = [
         ...baseMessages,
         { role: 'assistant', content: raw },
@@ -656,6 +718,7 @@ export async function reviewGeneratedQuestion(
   agent: LLMAgentSettings,
   options?: {
     onStatus?: (s: 'waiting_response' | 'thinking' | 'responding' | 'done') => void;
+    imageAttachment?: ImageUrlContent | null;
   }
 ): Promise<ReviewAuditResult> {
   const effectiveType: ProblemRecord['questionType'] = (draft.patch.questionType as ProblemRecord['questionType']) || draft.targetType;
@@ -676,10 +739,9 @@ export async function reviewGeneratedQuestion(
   const optionLines = normalizedOptions.map((opt, idx) => `${String.fromCharCode(65 + idx)}. ${opt}`);
 
   const guidelines: string[] = [];
-  guidelines.push('1. Clarity: the question must be understandable, contain no undefined terminology, and avoid ambiguous phrasing.');
-  guidelines.push('2. Multiple Choice validation: ensure options are distinct, the stated answer maps to exactly one option label, and no other option obviously shares the same truth value.');
-  guidelines.push('3. Formatting & MathJax: the <Generated Question> block must include all required fields exactly once (questionType, subfield, academicLevel, difficulty, Question, Options/none, Answer), and every mathematical expression must be valid MathJax (no unsupported environments or Markdown fences).');
-  guidelines.push('4. Language: all narrative content, labels, and explanations must be written in English; flag any non-English words (aside from standard mathematical symbols).');
+  guidelines.push('1. Problem coherence: the prompt must be internally consistent, define or reference every concept it uses, avoid contradictory statements, and omit redundant or impossible conditions.');
+  guidelines.push('2. Answer correctness: the stated answer must be correct and uniquely determined by the question. For Multiple Choice, exactly one option must be correct and the Answer line must reference that option; for Fill-in-the-blank, the answer must satisfy the condition implied by the blank; for Proof, the reasoning must logically establish the claim.');
+  guidelines.push('3. Option clarity (Multiple Choice only): each option must stay on its own labeled line (e.g., "A) ..."). Flag cases where labels are missing/duplicated or option text merges into surrounding math so that choices cannot be clearly distinguished.');
   guidelines.push('If any criterion fails, respond with status="fail" and describe each problem in "issues". Otherwise respond with status="pass".');
 
   const lines: string[] = [];
@@ -717,9 +779,10 @@ export async function reviewGeneratedQuestion(
   lines.push(draft.raw);
 
   const system = agent.prompt?.trim() || DEFAULT_AGENT_PROMPTS.reviewer;
+  const reviewContent = composeChatContent(lines.join('\n'), options?.imageAttachment);
   const rawReview = await chatStream([
     { role: 'system', content: system },
-    { role: 'user', content: lines.join('\n') }
+    { role: 'user', content: reviewContent }
   ], agent.config, { temperature: 0 }, options?.onStatus ? { onStatus: options.onStatus } : undefined);
 
   const parsed = parseReviewerJson(rawReview);

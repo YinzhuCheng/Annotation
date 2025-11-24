@@ -9,6 +9,7 @@ import {
   ProblemRecord,
   AgentId,
   LLMConfigState,
+  LLMAgentSettings,
 } from "../state/store";
 import {
   chatStream,
@@ -16,7 +17,7 @@ import {
   ocrWithLLM,
   translateWithLLM,
 } from "../lib/llmAdapter";
-import type { ChatMessage } from "../lib/llmAdapter";
+import type { ChatContent, ChatMessage, ImageUrlContent } from "../lib/llmAdapter";
 import { getImageBlob, saveImageBlobAtPath } from "../lib/db";
 import { openViewerWindow } from "../lib/viewer";
 import {
@@ -26,6 +27,7 @@ import {
   reviewGeneratedQuestion,
   ReviewAuditResult,
 } from "../lib/generator";
+import { resolveImageDataUrl } from "../lib/imageAttachments";
 import {
   buildDisplayName,
   collectFilesFromItems,
@@ -49,6 +51,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const store = useAppStore();
   const defaults = useAppStore((s) => s.defaults);
   const agents = useAppStore((s) => s.llmAgents);
+  const overallDraftConfig = useAppStore((s) => s.overallDraftConfig);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const current = useMemo(
@@ -88,6 +91,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>("");
   const [ocrDisplayName, setOcrDisplayName] = useState("");
   const [confirmedImageUrl, setConfirmedImageUrl] = useState<string>("");
+  const [problemImageDataUrl, setProblemImageDataUrl] = useState<string | null>(
+    null,
+  );
   const ocrFileInputRef = useRef<HTMLInputElement>(null);
   const [ocrContextMenu, setOcrContextMenu] = useState<{
     x: number;
@@ -122,6 +128,32 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     "qa",
   ];
   const [dotStep, setDotStep] = useState(0);
+  const buildProblemImageAttachment = (): ImageUrlContent | null =>
+    problemImageDataUrl
+      ? { type: "image_url", image_url: { url: problemImageDataUrl } }
+      : null;
+  const composeWithProblemImage = (text: string): ChatContent => {
+    const attachment = buildProblemImageAttachment();
+    return attachment
+      ? [
+          { type: "text", text },
+          attachment,
+        ]
+      : text;
+  };
+  const describeChatContent = (content: ChatContent): string => {
+    if (typeof content === "string") return content;
+    const placeholder = t("qaAssistantImagePlaceholder");
+    return content
+      .map((segment) =>
+        segment.type === "text" ? segment.text : placeholder,
+      )
+      .join("\n\n");
+  };
+  const getAgentSettings = (id: AgentId): LLMAgentSettings => {
+    const latest = useAppStore.getState().llmAgents[id];
+    return latest || (agents as Record<AgentId, LLMAgentSettings>)[id];
+  };
   const [translationInput, setTranslationInput] = useState("");
   const [translationOutput, setTranslationOutput] = useState("");
   const [translationStatus, setTranslationStatus] = useState<
@@ -411,7 +443,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [current.question]);
+  }, [current.question, showPreview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -456,6 +488,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     current.options,
     current.questionType,
     defaults.optionsCount,
+    showPreview,
   ]);
 
   useEffect(() => {
@@ -504,7 +537,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [latexInput]);
+  }, [latexInput, showPreview]);
 
   const isQaBusy = qaStatus !== "idle" && qaStatus !== "done";
 
@@ -554,6 +587,32 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       if (revokeUrl) URL.revokeObjectURL(revokeUrl);
     };
   }, [current.image]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const path = current.image?.trim();
+    if (!path) {
+      setProblemImageDataUrl(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    (async () => {
+      try {
+        const dataUrl = await resolveImageDataUrl(path);
+        if (!cancelled) {
+          setProblemImageDataUrl(dataUrl);
+        }
+      } catch {
+        if (!cancelled) {
+          setProblemImageDataUrl(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [current.id, current.image]);
 
   const update = (patch: Partial<ProblemRecord>) =>
     store.upsertProblem({ id: current.id, ...patch });
@@ -647,7 +706,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     }
     if (!ensureAgent("ocr")) return;
     setLlmStatusSource("ocr");
-    const text = await ocrWithLLM(ocrImage, agents.ocr, {
+    const ocrAgent = getAgentSettings("ocr");
+    const text = await ocrWithLLM(ocrImage, ocrAgent, {
       onStatus: (s) => setLlmStatus(s),
     });
     setOcrText(text);
@@ -665,41 +725,43 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     Boolean(cfg?.apiKey?.trim() && cfg?.model?.trim() && cfg?.baseUrl?.trim());
 
   const autoApplyOverallConfig = (): boolean => {
-    try {
-      const raw = localStorage.getItem("llm-overall-draft");
-      if (!raw) return false;
-      const parsed = JSON.parse(raw) as Partial<LLMConfigState>;
-      const apiKey = parsed.apiKey?.trim();
-      const model = parsed.model?.trim();
-      const baseUrl = parsed.baseUrl?.trim();
-      const provider = (parsed.provider as LLMConfigState["provider"]) || "openai";
-      if (!apiKey || !model || !baseUrl) return false;
-      const storeState = useAppStore.getState();
-      ALL_AGENT_IDS.forEach((id) => {
-        const currentAgent = storeState.llmAgents[id];
+    const apiKey = overallDraftConfig.apiKey?.trim();
+    const model = overallDraftConfig.model?.trim();
+    const baseUrl = overallDraftConfig.baseUrl?.trim();
+    if (!apiKey || !model || !baseUrl) return false;
+    const provider: LLMConfigState["provider"] = overallDraftConfig.provider || "openai";
+    const storeState = useAppStore.getState();
+    let applied = false;
+    ALL_AGENT_IDS.forEach((id) => {
+      const currentAgent = storeState.llmAgents[id];
+      const nextConfig: LLMConfigState = {
+        provider,
+        apiKey,
+        model,
+        baseUrl,
+      };
+      const currentConfig = currentAgent?.config;
+      const differs =
+        !currentConfig ||
+        currentConfig.provider !== nextConfig.provider ||
+        currentConfig.apiKey !== nextConfig.apiKey ||
+        currentConfig.model !== nextConfig.model ||
+        currentConfig.baseUrl !== nextConfig.baseUrl;
+      if (differs) {
         storeState.saveAgentSettings(id, {
           ...currentAgent,
-          config: {
-            provider,
-            apiKey,
-            model,
-            baseUrl,
-          },
+          config: nextConfig,
         });
-      });
-      return true;
-    } catch (err) {
-      console.warn("Failed to auto-apply overall LLM config", err);
-      return false;
-    }
+        applied = true;
+      }
+    });
+    return applied;
   };
 
   const ensureAgent = (agentId: AgentId): boolean => {
-    if (hasValidConfig(agents[agentId]?.config)) return true;
-    if (autoApplyOverallConfig()) {
-      const refreshed = useAppStore.getState().llmAgents[agentId]?.config;
-      if (hasValidConfig(refreshed)) return true;
-    }
+    autoApplyOverallConfig();
+    const refreshedConfig = useAppStore.getState().llmAgents[agentId]?.config;
+    if (hasValidConfig(refreshedConfig)) return true;
     alert(
       `${t("llmMissingTitle")}: ${t("llmAgentMissingBody", { agent: agentDisplay[agentId] })}`,
     );
@@ -733,8 +795,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       undefined,
       contextLabel,
     );
+    const latexAgent = getAgentSettings("latex");
     const corrected = (
-      await latexCorrection(payload, agents.latex, {
+      await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
       })
     ).trim();
@@ -786,6 +849,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     const input = current.question?.trim() || ocrText.trim();
     if (!input) return;
     if (!ensureAgent("generator") || !ensureAgent("reviewer")) return;
+    const sharedImageAttachment = buildProblemImageAttachment();
     const maxReviewRounds = Math.max(1, defaults.maxReviewRounds || 3);
     setLlmStatusSource("generate");
     setGeneratorPreview("");
@@ -801,14 +865,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     let workingProblem = current;
     try {
       for (let attempt = 1; attempt <= maxReviewRounds; attempt += 1) {
+        const generatorAgent = getAgentSettings("generator");
         const result = await generateProblemFromText(
           input,
           workingProblem,
-          agents.generator,
+          generatorAgent,
           defaults,
           {
             onStatus: (s) => setLlmStatus(s),
             conversation: [...historyConversation, ...dynamicConversation],
+            imageAttachment: sharedImageAttachment || undefined,
           },
         );
         workingProblem = {
@@ -817,6 +883,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         } as ProblemRecord;
 
         setLlmStatusSource("review");
+        const reviewerAgent = getAgentSettings("reviewer");
         const review = await reviewGeneratedQuestion(
           {
             raw: result.raw,
@@ -825,8 +892,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             patch: result.patch,
             targetType: workingProblem.questionType,
           },
-          agents.reviewer,
-          { onStatus: (s) => setLlmStatus(s) },
+          reviewerAgent,
+          {
+            onStatus: (s) => setLlmStatus(s),
+            imageAttachment: sharedImageAttachment || undefined,
+          },
         );
 
         setReviewerPreview(review.raw);
@@ -975,33 +1045,33 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (!trimmed) return;
     if (!ensureAgent("qa")) return;
     setQaError("");
+    const qaAgent = getAgentSettings("qa");
     const contextBlock = buildQaContext();
-    const systemPrompt = agents.qa.prompt?.trim() || "";
+    const systemPrompt = qaAgent.prompt?.trim() || "";
     setQaStatus("waiting_response");
     try {
       const historyMessages: ChatMessage[] = qaConversation.map((turn) => ({
         role: turn.role,
         content: turn.content,
       }));
+      const contextContent = composeWithProblemImage(contextBlock);
+      const nextQuestionContent = composeWithProblemImage(trimmed);
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `${contextBlock}`,
-        },
+        { role: "user", content: contextContent },
         ...historyMessages,
-        { role: "user", content: trimmed },
+        { role: "user", content: nextQuestionContent },
       ];
       const answer = await chatStream(
         messages,
-        agents.qa.config,
+        qaAgent.config,
         { temperature: 0 },
         { onStatus: (s) => setQaStatus(s) },
       );
       const now = Date.now();
       setQaConversation((prev) => [
         ...prev,
-        { role: "user", content: trimmed, timestamp: now },
+        { role: "user", content: nextQuestionContent, timestamp: now },
         { role: "assistant", content: answer, timestamp: now + 1 },
       ]);
       setQaInput("");
@@ -1056,7 +1126,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         uniqueErrors ?? fallbackReport,
         "MathJax preview panel",
       );
-      const corrected = await latexCorrection(payload, agents.latex, {
+      const latexAgent = getAgentSettings("latex");
+      const corrected = await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
       });
       setLatexInput(corrected);
@@ -1081,10 +1152,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setTranslationError("");
     setTranslationStatus("waiting_response");
     try {
+      const translatorAgent = getAgentSettings("translator");
       const output = await translateWithLLM(
         payload,
         translationTarget,
-        agents.translator,
+        translatorAgent,
         { onStatus: (s) => setTranslationStatus(s) },
       );
       setTranslationOutput(output);
@@ -2325,7 +2397,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                             className="small"
                             style={{ whiteSpace: "pre-wrap" }}
                           >
-                            {turn.content}
+                            {describeChatContent(turn.content)}
                           </div>
                         </div>
                       ))}
