@@ -126,7 +126,7 @@ const resources = {
       assistToolGeneratorAction: 'Run generation',
       qaAssistantTitle: 'Problem Q&A assistant',
       qaAssistantHint: 'Ask clarifying questions about the current problem. The assistant references the existing fields but never rewrites the draft.',
-      qaAssistantInputPlaceholder: 'Ask in any language—the reply will mirror your wording.',
+      qaAssistantInputPlaceholder: 'Ask in any language; the reply will mirror your wording.',
       qaAssistantSend: 'Send question',
       qaAssistantClear: 'Clear conversation',
       qaAssistantEmpty: 'No Q&A yet. Ask whether the answer is correct, what concepts it covers, or any other detail.',

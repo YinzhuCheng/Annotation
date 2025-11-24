@@ -32,7 +32,7 @@ type ImportedRowPreview = {
 
 export function ImportExport() {
   const { t } = useTranslation();
-  const { problems, upsertProblem } = useAppStore();
+  const { problems, upsertProblem, patchProblem } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageDirInputRef = useRef<HTMLInputElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
@@ -274,7 +274,7 @@ export function ImportExport() {
       if (!id || !setById.has(id)) continue; // only update existing problems
       const path = `images/${id}.${normalizedExt}`;
       await saveImageBlobAtPath(path, f);
-      upsertProblem({ id, image: path });
+      patchProblem(id, { image: path });
       count++;
     }
     return count;

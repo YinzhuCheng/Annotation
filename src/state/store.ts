@@ -191,6 +191,7 @@ interface AppState {
   problems: ProblemRecord[];
   currentId: string | null;
   upsertProblem: (p: Partial<ProblemRecord>) => void;
+  patchProblem: (id: string, patch: Partial<ProblemRecord>) => void;
   newProblem: () => void;
   deleteProblem: (id: string) => void;
   // Defaults and maintenance
@@ -372,6 +373,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('problems', JSON.stringify(next));
     localStorage.setItem('currentId', id);
     set({ problems: next, currentId: id });
+  },
+  patchProblem: (id, patch) => {
+    const problems = get().problems;
+    const next = problems.map((p) => {
+      if (p.id !== id) return p;
+      return {
+        ...p,
+        ...patch,
+        imageDependency: (patch.image ?? p.image) ? 1 : 0,
+        academicLevel: typeof (patch as any)?.academicLevel === 'string' ? (patch as any).academicLevel : p.academicLevel,
+        difficulty: typeof (patch as any)?.difficulty === 'string' ? (patch as any).difficulty : p.difficulty
+      };
+    });
+    localStorage.setItem('problems', JSON.stringify(next));
+    set({ problems: next });
   },
   newProblem: () => {
     const defaults = get().defaults;

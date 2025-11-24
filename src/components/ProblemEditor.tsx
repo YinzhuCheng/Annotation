@@ -1872,7 +1872,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
 
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolGenerator")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -2132,6 +2135,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </div>
               </div>
             </div>
+            <hr className="div" style={{ margin: "12px 0" }} />
             <div
               style={{
                 marginTop: 12,
@@ -2150,7 +2154,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 }}
               >
                 <div style={{ flex: 1, minWidth: 200 }}>
-                  <div className="label" style={{ marginBottom: 4 }}>
+                  <div
+                    className="label"
+                    style={{
+                      marginBottom: 4,
+                      fontSize: "1.05rem",
+                      fontWeight: 600,
+                    }}
+                  >
                     {t("qaAssistantTitle")}
                   </div>
                   <div
@@ -2271,7 +2282,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   gap: 8,
                 }}
               >
-                <div className="label" style={{ margin: 0 }}>
+                <div
+                  className="label"
+                  style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}
+                >
                   {t("assistToolTranslation")}
                 </div>
                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -2370,7 +2384,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolLatex")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -2472,7 +2489,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             </div>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
-              <div className="label" style={{ marginBottom: 4 }}>
+              <div
+                className="label"
+                style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
+              >
                 {t("assistToolOcr")}
               </div>
               <div className="small" style={{ color: "var(--text-muted)" }}>
