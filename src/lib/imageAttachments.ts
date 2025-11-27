@@ -10,12 +10,17 @@ export async function resolveImageDataUrl(imagePath?: string | null): Promise<st
     return trimmed;
   }
   let blob: Blob | undefined;
-  if (trimmed.startsWith('images/')) {
-    blob = await getImageBlob(trimmed);
+  const isRemote =
+    /^https?:\/\//i.test(trimmed) || trimmed.toLowerCase().startsWith('blob:');
+  const normalized = isRemote || trimmed.startsWith('images/')
+    ? trimmed
+    : `images/${trimmed.replace(/^\/+/, '')}`;
+  if (normalized.startsWith('images/')) {
+    blob = await getImageBlob(normalized);
   }
   if (!blob) {
     try {
-      const response = await fetch(trimmed);
+      const response = await fetch(normalized);
       if (response.ok) {
         blob = await response.blob();
       }

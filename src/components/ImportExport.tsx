@@ -72,9 +72,42 @@ export function ImportExport() {
     el.setAttribute('directory', '');
   }, []);
 
-  const normalizeProblemImageKey = (value: string): string => {
+  const isRemoteImagePath = (value: string): boolean => {
+    const lower = value.trim().toLowerCase();
+    return (
+      lower.startsWith('http://') ||
+      lower.startsWith('https://') ||
+      lower.startsWith('data:') ||
+      lower.startsWith('blob:')
+    );
+  };
+
+  const ensureImagesPrefix = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (isRemoteImagePath(trimmed) || trimmed.startsWith('images/')) {
+      return trimmed;
+    }
+    return `images/${trimmed.replace(/^\/+/, '')}`;
+  };
+
+  const normalizeExportImagePath = (value: string): string => {
     const trimmed = (value || '').trim();
     if (!trimmed) return '';
+    if (isRemoteImagePath(trimmed)) return trimmed;
+    return ensureImagesPrefix(trimmed);
+  };
+
+  const normalizeImportedImagePath = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+    if (isRemoteImagePath(trimmed)) return trimmed;
+    return ensureImagesPrefix(trimmed);
+  };
+
+  const normalizeProblemImageKey = (value: string): string => {
+    const trimmed = (value || '').trim();
+    if (!trimmed || isRemoteImagePath(trimmed)) return '';
     if (trimmed.startsWith('images/')) return trimmed.slice('images/'.length);
     return trimmed;
   };
@@ -108,17 +141,22 @@ export function ImportExport() {
     if (trimmed.startsWith('data:')) {
       return dataUrlToBlob(trimmed);
     }
-    if (trimmed.startsWith('images/')) {
-      const blob = await getImageBlob(trimmed);
+    const normalized = isRemoteImagePath(trimmed)
+      ? trimmed
+      : ensureImagesPrefix(trimmed);
+    if (normalized.startsWith('images/')) {
+      const blob = await getImageBlob(normalized);
       if (blob) return blob;
     }
-    try {
-      const response = await fetch(trimmed);
-      if (response.ok) {
-        return await response.blob();
+    if (isRemoteImagePath(normalized)) {
+      try {
+        const response = await fetch(normalized);
+        if (response.ok) {
+          return await response.blob();
+        }
+      } catch {
+        // ignore network failures
       }
-    } catch {
-      // ignore network failures
     }
     return null;
   };
@@ -187,8 +225,8 @@ export function ImportExport() {
       const answer = String(p.answer ?? '');
       const subfield = String(p.subfield ?? '');
       const source = String(p.source ?? '');
-      const imageName = resolveImageFileName(p.image);
-      const imageDependency = imageName ? 1 : 0;
+      const imagePath = normalizeExportImagePath(p.image);
+      const imageDependency = imagePath ? 1 : 0;
       const academicLevel = String(p.academicLevel ?? '');
       const difficulty = String(p.difficulty ?? '');
       return [
@@ -199,7 +237,7 @@ export function ImportExport() {
         answer,
         subfield,
         source,
-        imageName,
+        imagePath,
         imageDependency,
         academicLevel,
         difficulty
@@ -223,8 +261,12 @@ export function ImportExport() {
       const p = problems[i];
       if (!p.image) continue;
       const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex });
-      const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-      (ws as any)[cellAddr] = { t: 's', v: fileName, l: { Target: `images/${fileName}`, Tooltip: fileName } };
+      const exportPath = normalizeExportImagePath(p.image);
+      (ws as any)[cellAddr] = {
+        t: 's',
+        v: exportPath,
+        l: { Target: exportPath, Tooltip: exportPath },
+      };
     }
   };
 
@@ -339,14 +381,7 @@ export function ImportExport() {
       const subfield = String(row[findIndex('Subfield')] || '');
       const source = String(row[findIndex('Source')] || '');
       const imageRaw = String(row[findIndex('Image')] || '').trim();
-      let image = '';
-      if (imageRaw) {
-        if (imageRaw.includes('/') || imageRaw.includes('\\')) {
-          image = imageRaw;
-        } else {
-          image = `images/${imageRaw}`;
-        }
-      }
+      const image = normalizeImportedImagePath(imageRaw);
       const imageDependency = image ? 1 : 0;
       const academicLevel = String(row[findIndex('Academic_Level')] || 'K12') as any;
       const difficulty = String(row[findIndex('Difficulty')] || '1') as any;
@@ -360,8 +395,11 @@ export function ImportExport() {
   };
 
   // Import images from dropped files/folders; preserve dataset-relative paths when possible
-  const importImagesFromFiles = async (files: File[]): Promise<number> => {
+  const importImagesFromFiles = async (
+    files: File[],
+  ): Promise<{ count: number; matchedKeys: Set<string> }> => {
     let count = 0;
+    const matchedKeys = new Set<string>();
     const problemsByImage = new Map<string, string[]>();
     for (const p of problems) {
       const key = normalizeProblemImageKey(p.image);
@@ -385,14 +423,13 @@ export function ImportExport() {
         : relative;
       const sanitized = relativeWithoutPrefix.replace(/^\/+/, '');
       if (!sanitized) continue;
-      const storagePath = `images/${sanitized}`;
+      const storagePath = ensureImagesPrefix(sanitized);
       await saveImageBlobAtPath(storagePath, f);
       const lookupKey = sanitized;
       const matchedProblems = problemsByImage.get(lookupKey);
       if (matchedProblems?.length) {
-        matchedProblems.forEach((id) =>
-          patchProblem(id, { image: storagePath }),
-        );
+        matchedKeys.add(lookupKey);
+        matchedProblems.forEach((id) => patchProblem(id, { image: storagePath }));
       } else {
         const baseName = sanitized.split('/').pop() || sanitized;
         const candidateId = baseName.includes('.')
@@ -404,7 +441,7 @@ export function ImportExport() {
       }
       count++;
     }
-    return count;
+    return { count, matchedKeys };
   };
 
   const handleBatchRename = async () => {
@@ -532,13 +569,21 @@ export function ImportExport() {
     }
     const base = formatTimestamp();
     const label = buildBatchLabel('imgset', eligible.length, base);
-    const imported = await importImagesFromFiles(eligible);
+    const { count: imported, matchedKeys } = await importImagesFromFiles(eligible);
     if (imported > 0) {
       setImportedImagesCount(imported);
     } else {
       setImportedImagesCount(null);
     }
     setImagesDisplayName(label);
+    const snapshot = useAppStore.getState();
+    snapshot.problems.forEach((problem) => {
+      const key = normalizeProblemImageKey(problem.image);
+      if (!key) return;
+      if (!matchedKeys.has(key)) {
+        patchProblem(problem.id, { image: '', imageDependency: 0 });
+      }
+    });
   };
 
   const ellipsize = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}...` : value);
