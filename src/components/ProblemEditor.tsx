@@ -28,6 +28,7 @@ import {
   ReviewAuditResult,
 } from "../lib/generator";
 import { resolveImageDataUrl } from "../lib/imageAttachments";
+import { normalizeImagePath } from "../lib/fileHelpers";
 import {
   buildDisplayName,
   collectFilesFromItems,
@@ -1327,25 +1328,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   useEffect(() => {
     const currentPath = current.image?.trim();
-    if (!currentPath || !currentPath.startsWith("images/")) return;
-    const ext = currentPath.includes(".")
-      ? currentPath.substring(currentPath.lastIndexOf(".") + 1).toLowerCase()
-      : "jpg";
-    const normalizedExt = ext === "jpeg" ? "jpg" : ext;
-    const desiredPath = `images/${current.id}.${normalizedExt}`;
-    if (currentPath === desiredPath) return;
-    let cancelled = false;
-    (async () => {
-      const blob = await getImageBlob(currentPath);
-      if (!blob || cancelled) return;
-      await saveImageBlobAtPath(desiredPath, blob);
-      if (cancelled) return;
-      update({ image: desiredPath });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [current.image, current.id]);
+    if (!currentPath) return;
+    if (currentPath.startsWith("images/")) return;
+    const normalized = normalizeImagePath(currentPath);
+    if (normalized === currentPath) return;
+    update({ image: normalized });
+  }, [current.image]);
 
   useEffect(() => {
     if (!showPreview) return;

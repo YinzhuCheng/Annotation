@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
 import { saveImageBlobAtPath } from '../lib/db';
 import { openViewerWindow } from '../lib/viewer';
-import { buildDisplayName, collectFilesFromItems, extractFilesFromClipboardData, formatTimestamp, inferExtension, readClipboardFiles } from '../lib/fileHelpers';
+import { buildDisplayName, collectFilesFromItems, ensureImagesPrefix, extractFilesFromClipboardData, formatTimestamp, inferExtension, normalizeImagePath, readClipboardFiles } from '../lib/fileHelpers';
 
 type BlockFile = { blob: File | Blob; displayName: string };
 
@@ -49,6 +49,12 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
   const [isComposing, setIsComposing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ blockId: string; target: 'single' | 'options' | 'custom'; x: number; y: number } | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+
+  const makeComposerImagePath = () => {
+    const base = formatTimestamp();
+    const rand = Math.random().toString(36).slice(2, 8);
+    return ensureImagesPrefix(`composer-${base}-${rand}.jpg`);
+  };
 
   useEffect(() => {
     const closeMenu = () => {
@@ -704,7 +710,13 @@ export function ImageComposer({ showHeader = true }: { showHeader?: boolean } = 
               disabled={!composedBlob}
               onClick={async () => {
                 if (!composedBlob) return;
-                const targetPath = `images/${problem.id}.jpg`;
+                let targetPath = '';
+                const existingPath = normalizeImagePath(problem.image);
+                if (existingPath.startsWith('images/')) {
+                  targetPath = existingPath;
+                } else {
+                  targetPath = makeComposerImagePath();
+                }
                 await saveImageBlobAtPath(targetPath, composedBlob);
                 update({ id: problem.id, image: targetPath });
                 setComposedBlob(null);
