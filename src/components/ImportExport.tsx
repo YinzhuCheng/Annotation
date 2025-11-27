@@ -258,10 +258,31 @@ export function ImportExport() {
     return { count, firstRow };
   };
 
-  // Import images from dropped files/folders; filenames must be <id>.<ext>
+  // Import images from dropped files/folders
+  // First try to match by filename with Image column path, then fallback to id matching
   const importImagesFromFiles = async (files: File[]): Promise<number> => {
     let count = 0;
     const setById = new Set(problems.map(p => p.id));
+    
+    // Build a map from image filename to problem for path-based matching
+    const imagePathToProblem = new Map<string, typeof problems[0]>();
+    for (const p of problems) {
+      if (p.image) {
+        const fileName = resolveImageFileName(p.image);
+        if (fileName) {
+          // Store both with and without extension for flexible matching
+          imagePathToProblem.set(fileName.toLowerCase(), p);
+          const dotIndex = fileName.lastIndexOf('.');
+          if (dotIndex !== -1) {
+            const nameWithoutExt = fileName.slice(0, dotIndex).toLowerCase();
+            imagePathToProblem.set(nameWithoutExt, p);
+          }
+        }
+      }
+    }
+    
+    const matchedProblems = new Set<string>(); // Track which problems have been matched
+    
     for (const f of files) {
       const baseName = (f.name || '').trim();
       if (!baseName) continue;
@@ -269,12 +290,55 @@ export function ImportExport() {
       if (!extRaw) continue;
       const normalizedExt = extRaw === 'jpeg' ? 'jpg' : extRaw;
       if (!ACCEPTED_IMAGE_EXT.includes(normalizedExt)) continue;
+      
+      let matchedProblem: typeof problems[0] | undefined;
+      let targetPath: string;
+      
+      // First try: match by filename with Image column path
+      const fileNameLower = baseName.toLowerCase();
+      const nameWithoutExt = baseName.lastIndexOf('.') !== -1 
+        ? baseName.slice(0, baseName.lastIndexOf('.')).toLowerCase()
+        : baseName.toLowerCase();
+      
+      matchedProblem = imagePathToProblem.get(fileNameLower) || imagePathToProblem.get(nameWithoutExt);
+      
+      if (matchedProblem && !matchedProblems.has(matchedProblem.id)) {
+        // Use the existing image path format, but update the extension if needed
+        const existingPath = matchedProblem.image || '';
+        if (existingPath.startsWith('images/')) {
+          const existingFileName = resolveImageFileName(existingPath);
+          const existingExt = existingFileName.lastIndexOf('.') !== -1
+            ? existingFileName.slice(existingFileName.lastIndexOf('.') + 1).toLowerCase()
+            : 'jpg';
+          const normalizedExistingExt = existingExt === 'jpeg' ? 'jpg' : existingExt;
+          
+          // Keep the original path structure, but update extension if file extension differs
+          if (normalizedExistingExt !== normalizedExt) {
+            // Update extension to match the actual file
+            const pathWithoutExt = existingPath.slice(0, existingPath.lastIndexOf('.'));
+            targetPath = `${pathWithoutExt}.${normalizedExt}`;
+          } else {
+            targetPath = existingPath;
+          }
+        } else {
+          // If not images/ prefix, use id-based path
+          targetPath = `images/${matchedProblem.id}.${normalizedExt}`;
+        }
+        await saveImageBlobAtPath(targetPath, f);
+        patchProblem(matchedProblem.id, { image: targetPath });
+        matchedProblems.add(matchedProblem.id);
+        count++;
+        continue;
+      }
+      
+      // Fallback: match by id (original logic)
       const dotIndex = baseName.lastIndexOf('.');
       const id = dotIndex === -1 ? baseName : baseName.slice(0, dotIndex);
-      if (!id || !setById.has(id)) continue; // only update existing problems
-      const path = `images/${id}.${normalizedExt}`;
-      await saveImageBlobAtPath(path, f);
-      patchProblem(id, { image: path });
+      if (!id || !setById.has(id) || matchedProblems.has(id)) continue;
+      targetPath = `images/${id}.${normalizedExt}`;
+      await saveImageBlobAtPath(targetPath, f);
+      patchProblem(id, { image: targetPath });
+      matchedProblems.add(id);
       count++;
     }
     return count;
