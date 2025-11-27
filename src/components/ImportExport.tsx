@@ -10,10 +10,13 @@ import JSZip from 'jszip';
 import {
   buildBatchLabel,
   collectFilesFromItems,
+  ensureImagesPrefix,
   extractFilesFromClipboardData,
-  readClipboardFiles,
-  inferExtension,
   formatTimestamp,
+  inferExtension,
+  isRemoteImagePath,
+  normalizeImagePath,
+  readClipboardFiles,
   resolveImageFileName
 } from '../lib/fileHelpers';
 
@@ -72,53 +75,28 @@ export function ImportExport() {
     el.setAttribute('directory', '');
   }, []);
 
-  const isRemoteImagePath = (value: string): boolean => {
-    const lower = value.trim().toLowerCase();
-    return (
-      lower.startsWith('http://') ||
-      lower.startsWith('https://') ||
-      lower.startsWith('data:') ||
-      lower.startsWith('blob:')
-    );
-  };
+  const normalizeExportImagePath = (value: string): string => normalizeImagePath(value);
+  const normalizeImportedImagePath = (value: string): string => normalizeImagePath(value);
+  const normalizeProblemImageKey = (value: string): string => normalizeImagePath(value);
 
-  const ensureImagesPrefix = (value: string): string => {
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-    if (isRemoteImagePath(trimmed) || trimmed.startsWith('images/')) {
-      return trimmed;
-    }
-    return `images/${trimmed.replace(/^\/+/, '')}`;
-  };
-
-  const normalizeExportImagePath = (value: string): string => {
-    const trimmed = (value || '').trim();
-    if (!trimmed) return '';
-    if (isRemoteImagePath(trimmed)) return trimmed;
-    return ensureImagesPrefix(trimmed);
-  };
-
-  const normalizeImportedImagePath = (value: string): string => {
-    const trimmed = (value || '').trim();
-    if (!trimmed) return '';
-    if (isRemoteImagePath(trimmed)) return trimmed;
-    return ensureImagesPrefix(trimmed);
-  };
-
-  const normalizeProblemImageKey = (value: string): string => {
-    const trimmed = (value || '').trim();
-    if (!trimmed || isRemoteImagePath(trimmed)) return '';
-    if (trimmed.startsWith('images/')) return trimmed.slice('images/'.length);
-    return trimmed;
+  const rebuildImageBindings = (list: ProblemRecord[]): Record<string, string[]> => {
+    const bindings: Record<string, string[]> = {};
+    list.forEach((problem) => {
+      const key = normalizeProblemImageKey(problem.image);
+      if (!key) return;
+      if (!bindings[key]) bindings[key] = [];
+      bindings[key].push(problem.id);
+    });
+    return bindings;
   };
 
   const normalizeDroppedImagePath = (file: File): string => {
     const raw = (file.webkitRelativePath || file.name || '').replace(/\\/g, '/');
-    if (!raw) return file.name || '';
+    if (!raw) return ensureImagesPrefix(file.name || '');
     const lower = raw.toLowerCase();
     const idx = lower.lastIndexOf('images/');
     const sliced = idx !== -1 ? raw.slice(idx + 'images/'.length) : raw;
-    return sliced.replace(/^\/+/, '');
+    return ensureImagesPrefix(sliced.replace(/^\/+/, ''));
   };
 
   const dataUrlToBlob = (dataUrl: string): Blob => {
@@ -141,9 +119,7 @@ export function ImportExport() {
     if (trimmed.startsWith('data:')) {
       return dataUrlToBlob(trimmed);
     }
-    const normalized = isRemoteImagePath(trimmed)
-      ? trimmed
-      : ensureImagesPrefix(trimmed);
+    const normalized = normalizeImagePath(trimmed);
     if (normalized.startsWith('images/')) {
       const blob = await getImageBlob(normalized);
       if (blob) return blob;
@@ -296,15 +272,19 @@ export function ImportExport() {
       if (!p.image) continue;
       try {
         let blob: Blob | undefined;
-        if (p.image.startsWith('images/')) {
-          blob = (await getImageBlob(p.image)) as Blob | undefined;
+        const exportPath = normalizeExportImagePath(p.image);
+        if (!exportPath) continue;
+        if (exportPath.startsWith('images/')) {
+          blob = (await getImageBlob(exportPath)) as Blob | undefined;
         } else {
-          const r = await fetch(p.image);
+          const r = await fetch(exportPath);
           blob = await r.blob();
         }
         if (blob) {
-          const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-          zip.file(`images/${fileName}`, blob);
+          const targetPath = exportPath.startsWith('images/')
+            ? exportPath
+            : `images/${resolveImageFileName(exportPath, `${p.id}.jpg`)}`;
+          zip.file(targetPath, blob);
         }
       } catch {
         // ignore
@@ -320,15 +300,19 @@ export function ImportExport() {
       if (!p.image) continue;
       try {
         let blob: Blob | undefined;
-        if (p.image.startsWith('images/')) {
-          blob = (await getImageBlob(p.image)) as Blob | undefined;
+        const exportPath = normalizeExportImagePath(p.image);
+        if (!exportPath) continue;
+        if (exportPath.startsWith('images/')) {
+          blob = (await getImageBlob(exportPath)) as Blob | undefined;
         } else {
-          const r = await fetch(p.image);
+          const r = await fetch(exportPath);
           blob = await r.blob();
         }
         if (blob) {
-          const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-          zip.file(fileName, blob);
+          const targetPath = exportPath.startsWith('images/')
+            ? exportPath
+            : `images/${resolveImageFileName(exportPath, `${p.id}.jpg`)}`;
+          zip.file(targetPath, blob);
         }
       } catch {
         // ignore missing blobs
@@ -403,7 +387,7 @@ export function ImportExport() {
     const problemsByImage = new Map<string, string[]>();
     for (const p of problems) {
       const key = normalizeProblemImageKey(p.image);
-      if (!key) continue;
+      if (!key || isRemoteImagePath(key)) continue;
       if (!problemsByImage.has(key)) {
         problemsByImage.set(key, []);
       }
@@ -412,26 +396,19 @@ export function ImportExport() {
     const existingIds = new Set(problems.map((p) => p.id));
 
     for (const f of files) {
-      const relative = normalizeDroppedImagePath(f);
-      if (!relative) continue;
+      const storagePath = normalizeDroppedImagePath(f);
+      if (!storagePath) continue;
       const extRaw = inferExtension(f, '').toLowerCase();
       if (!extRaw) continue;
       const normalizedExt = extRaw === 'jpeg' ? 'jpg' : extRaw;
       if (!ACCEPTED_IMAGE_EXT.includes(normalizedExt)) continue;
-      const relativeWithoutPrefix = relative.startsWith('images/')
-        ? relative.slice('images/'.length)
-        : relative;
-      const sanitized = relativeWithoutPrefix.replace(/^\/+/, '');
-      if (!sanitized) continue;
-      const storagePath = ensureImagesPrefix(sanitized);
       await saveImageBlobAtPath(storagePath, f);
-      const lookupKey = sanitized;
-      const matchedProblems = problemsByImage.get(lookupKey);
+      const matchedProblems = problemsByImage.get(storagePath);
       if (matchedProblems?.length) {
-        matchedKeys.add(lookupKey);
+        matchedKeys.add(storagePath);
         matchedProblems.forEach((id) => patchProblem(id, { image: storagePath }));
       } else {
-        const baseName = sanitized.split('/').pop() || sanitized;
+        const baseName = storagePath.split('/').pop() || storagePath;
         const candidateId = baseName.includes('.')
           ? baseName.slice(0, baseName.lastIndexOf('.'))
           : baseName;
@@ -492,7 +469,9 @@ export function ImportExport() {
       } else {
         localStorage.removeItem('currentId');
       }
-      useAppStore.setState({ problems: renamed, currentId: nextCurrentId });
+      const bindings = rebuildImageBindings(renamed);
+      localStorage.setItem('image-bindings', JSON.stringify(bindings));
+      useAppStore.setState({ problems: renamed, currentId: nextCurrentId, imageBindings: bindings });
       setBulkRenameMessage(t('bulkRenameSuccess', { count: renamed.length }));
     } catch (error) {
       console.error(error);
@@ -577,12 +556,13 @@ export function ImportExport() {
     }
     setImagesDisplayName(label);
     const snapshot = useAppStore.getState();
-    snapshot.problems.forEach((problem) => {
-      const key = normalizeProblemImageKey(problem.image);
-      if (!key) return;
-      if (!matchedKeys.has(key)) {
-        patchProblem(problem.id, { image: '', imageDependency: 0 });
-      }
+    const bindings = snapshot.imageBindings || {};
+    Object.entries(bindings).forEach(([path, ids]) => {
+      if (!path || isRemoteImagePath(path)) return;
+      if (matchedKeys.has(path)) return;
+      ids.forEach((problemId) =>
+        patchProblem(problemId, { image: '', imageDependency: 0 }),
+      );
     });
   };
 

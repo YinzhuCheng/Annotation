@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeImagePath } from '../lib/fileHelpers';
 
 export type Mode = 'manual' | 'agent';
 
@@ -182,6 +183,8 @@ export interface ProblemRecord {
   difficulty: string;
 }
 
+type ImageBindings = Record<string, string[]>;
+
 interface AppState {
   mode: Mode;
   setMode: (m: Mode) => void;
@@ -194,6 +197,7 @@ interface AppState {
   patchProblem: (id: string, patch: Partial<ProblemRecord>) => void;
   newProblem: () => void;
   deleteProblem: (id: string) => void;
+  imageBindings: ImageBindings;
   // Defaults and maintenance
   defaults: DefaultSettings;
   setDefaults: (p: Partial<DefaultSettings>) => void;
@@ -287,6 +291,37 @@ const createEmptyProblem = (defaults: DefaultSettings): ProblemRecord => ({
   difficulty: defaults.difficultyOptions[0] ?? ''
 });
 
+const sanitizeProblemImage = (value?: string | null) => {
+  const image = normalizeImagePath(value ?? '');
+  const imageDependency: 0 | 1 = image ? 1 : 0;
+  return { image, imageDependency };
+};
+
+const sanitizeProblemPatch = (patch: Partial<ProblemRecord>): Partial<ProblemRecord> => {
+  if (Object.prototype.hasOwnProperty.call(patch, 'image')) {
+    const { image, imageDependency } = sanitizeProblemImage(patch.image ?? '');
+    return { ...patch, image, imageDependency };
+  }
+  return patch;
+};
+
+const buildImageBindings = (problems: ProblemRecord[]): ImageBindings => {
+  const bindings: ImageBindings = {};
+  problems.forEach((problem) => {
+    const key = normalizeImagePath(problem.image);
+    if (!key) return;
+    if (!bindings[key]) bindings[key] = [];
+    bindings[key].push(problem.id);
+  });
+  return bindings;
+};
+
+const persistImageBindings = (problems: ProblemRecord[]): ImageBindings => {
+  const bindings = buildImageBindings(problems);
+  localStorage.setItem('image-bindings', JSON.stringify(bindings));
+  return bindings;
+};
+
 const normalizeProblem = (raw: any, defaults: DefaultSettings): ProblemRecord => {
   const id = typeof raw?.id === 'string' ? raw.id : `${Date.now()}`;
   const question = typeof raw?.question === 'string' ? raw.question : '';
@@ -299,16 +334,36 @@ const normalizeProblem = (raw: any, defaults: DefaultSettings): ProblemRecord =>
   const answer = typeof raw?.answer === 'string' ? raw.answer : (Array.isArray(raw?.answer) ? JSON.stringify(raw.answer) : '');
   const subfield = typeof raw?.subfield === 'string' ? raw.subfield : '';
   const source = typeof raw?.source === 'string' ? raw.source : '';
-  const image = typeof raw?.image === 'string' ? raw.image : '';
+  const imageValue = typeof raw?.image === 'string' ? raw.image : '';
+  const { image, imageDependency } = sanitizeProblemImage(imageValue);
   const academicLevel = typeof raw?.academicLevel === 'string' ? raw.academicLevel : (defaults.academicLevels[0] ?? '');
   const difficulty = typeof raw?.difficulty === 'string'
     ? raw.difficulty
     : typeof raw?.difficulty === 'number'
       ? String(raw.difficulty)
       : (defaults.difficultyOptions[0] ?? '');
-  const imageDependency: 0 | 1 = image ? 1 : 0;
   return { id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty };
 };
+
+const initialProblems: ProblemRecord[] = (() => {
+  const raw = localStorage.getItem('problems');
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as any[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const normalized = parsed.map((p) => normalizeProblem(p, initialDefaults));
+        localStorage.setItem('problems', JSON.stringify(normalized));
+        return normalized;
+      }
+    } catch {}
+  }
+  const first = createEmptyProblem(initialDefaults);
+  localStorage.setItem('problems', JSON.stringify([first]));
+  localStorage.setItem('currentId', first.id);
+  return [first];
+})();
+
+const initialImageBindings: ImageBindings = persistImageBindings(initialProblems);
 
 export const useAppStore = create<AppState>((set, get) => ({
   mode: initialMode,
@@ -344,71 +399,66 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('defaults', JSON.stringify(next));
     set({ defaults: next });
   },
-  problems: (() => {
-    const raw = localStorage.getItem('problems');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as any[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((p) => normalizeProblem(p, initialDefaults));
-        }
-      } catch {}
-    }
-    const first = createEmptyProblem(initialDefaults);
-    localStorage.setItem('problems', JSON.stringify([first]));
-    localStorage.setItem('currentId', first.id);
-    return [first];
-  })(),
+  problems: initialProblems,
   currentId: localStorage.getItem('currentId'),
+  imageBindings: initialImageBindings,
   upsertProblem: (partial) => {
     const state = get();
     const { problems, currentId, defaults } = state;
     const id = partial.id || currentId || `${Date.now()}`;
+    const sanitizedPartial = sanitizeProblemPatch(partial);
     let found = false;
     const next = problems.map((p) => {
-      if (p.id === id) {
-        found = true;
-        const merged: ProblemRecord = {
-          ...p,
-          ...partial,
-          imageDependency: (partial.image ?? p.image) ? 1 : 0,
-          academicLevel: typeof (partial as any)?.academicLevel === 'string' ? (partial as any).academicLevel : p.academicLevel,
-          difficulty: typeof (partial as any)?.difficulty === 'string' ? (partial as any).difficulty : p.difficulty
-        } as ProblemRecord;
-        return merged;
-      }
-      return p;
+      if (p.id !== id) return p;
+      found = true;
+      const nextImage = sanitizedPartial.image ?? p.image;
+      const merged: ProblemRecord = {
+        ...p,
+        ...sanitizedPartial,
+        image: nextImage,
+        imageDependency: nextImage ? 1 : 0,
+        academicLevel: typeof (sanitizedPartial as any)?.academicLevel === 'string' ? (sanitizedPartial as any).academicLevel : p.academicLevel,
+        difficulty: typeof (sanitizedPartial as any)?.difficulty === 'string' ? (sanitizedPartial as any).difficulty : p.difficulty
+      } as ProblemRecord;
+      return merged;
     });
     if (!found) {
       const base = createEmptyProblem(defaults);
+      const nextImage = sanitizedPartial.image ?? base.image;
       const merged: ProblemRecord = {
         ...base,
-        ...partial,
+        ...sanitizedPartial,
         id,
-        imageDependency: partial.image ? 1 : 0,
-        academicLevel: typeof (partial as any)?.academicLevel === 'string' ? (partial as any).academicLevel : base.academicLevel,
-        difficulty: typeof (partial as any)?.difficulty === 'string' ? (partial as any).difficulty : base.difficulty
+        image: nextImage,
+        imageDependency: nextImage ? 1 : 0,
+        academicLevel: typeof (sanitizedPartial as any)?.academicLevel === 'string' ? (sanitizedPartial as any).academicLevel : base.academicLevel,
+        difficulty: typeof (sanitizedPartial as any)?.difficulty === 'string' ? (sanitizedPartial as any).difficulty : base.difficulty
       } as ProblemRecord;
       next.push(merged);
     }
     localStorage.setItem('problems', JSON.stringify(next));
     localStorage.setItem('currentId', id);
-    set({ problems: next, currentId: id });
+    const imageBindings = persistImageBindings(next);
+    set({ problems: next, currentId: id, imageBindings });
   },
   patchProblem: (id, patch) => {
     const problems = get().problems;
+    const sanitizedPatch = sanitizeProblemPatch(patch);
     const next = problems.map((p) => {
       if (p.id !== id) return p;
+      const nextImage = sanitizedPatch.image ?? p.image;
       return {
         ...p,
-        ...patch,
-        imageDependency: (patch.image ?? p.image) ? 1 : 0,
-        academicLevel: typeof (patch as any)?.academicLevel === 'string' ? (patch as any).academicLevel : p.academicLevel,
-        difficulty: typeof (patch as any)?.difficulty === 'string' ? (patch as any).difficulty : p.difficulty
+        ...sanitizedPatch,
+        image: nextImage,
+        imageDependency: nextImage ? 1 : 0,
+        academicLevel: typeof (sanitizedPatch as any)?.academicLevel === 'string' ? (sanitizedPatch as any).academicLevel : p.academicLevel,
+        difficulty: typeof (sanitizedPatch as any)?.difficulty === 'string' ? (sanitizedPatch as any).difficulty : p.difficulty
       };
     });
     localStorage.setItem('problems', JSON.stringify(next));
-    set({ problems: next });
+    const imageBindings = persistImageBindings(next);
+    set({ problems: next, imageBindings });
   },
   newProblem: () => {
     const defaults = get().defaults;
@@ -416,7 +466,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = [p, ...get().problems];
     localStorage.setItem('problems', JSON.stringify(next));
     localStorage.setItem('currentId', p.id);
-    set({ problems: next, currentId: p.id });
+    const imageBindings = persistImageBindings(next);
+    set({ problems: next, currentId: p.id, imageBindings });
   },
   deleteProblem: (id) => {
     const problems = get().problems;
@@ -442,7 +493,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    set({ problems: next, currentId: nextId });
+    const imageBindings = persistImageBindings(next);
+    set({ problems: next, currentId: nextId, imageBindings });
   },
   applyOptionsCountToExisting: (count: number) => {
     const next = get().problems.map((p) => {
@@ -457,7 +509,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { ...p, options: opts, answer };
     });
     localStorage.setItem('problems', JSON.stringify(next));
-    set({ problems: next });
+    const imageBindings = persistImageBindings(next);
+    set({ problems: next, imageBindings });
   },
   clearAllProblems: () => {
     // Remove all problems and related pointers
@@ -475,7 +528,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const first = createEmptyProblem(get().defaults);
     localStorage.setItem('problems', JSON.stringify([first]));
     localStorage.setItem('currentId', first.id);
-    set({ problems: [first], currentId: first.id });
+    const imageBindings = persistImageBindings([first]);
+    set({ problems: [first], currentId: first.id, imageBindings });
   },
   overallDraftConfig: initialOverallDraftConfig,
   setOverallDraftConfig: (partial) => {

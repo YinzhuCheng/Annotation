@@ -78,6 +78,33 @@ export function buildBatchLabel(ext: string, count: number, base?: string): stri
   return `${timestamp}${normalizedExt ? `.${normalizedExt}` : ''}${suffix}`;
 }
 
+export function isRemoteImagePath(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('blob:')
+  );
+}
+
+export function ensureImagesPrefix(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const withoutLeadingSlashes = trimmed.replace(/^\/+/, '');
+  if (withoutLeadingSlashes.toLowerCase().startsWith('images/')) {
+    return `images/${withoutLeadingSlashes.slice('images/'.length)}`;
+  }
+  return `images/${withoutLeadingSlashes}`;
+}
+
+export function normalizeImagePath(value?: string | null): string {
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) return '';
+  if (isRemoteImagePath(trimmed)) return trimmed;
+  return ensureImagesPrefix(trimmed);
+}
+
 export function resolveImageFileName(path?: string, fallback?: string): string {
   const raw = (path || '').trim();
   if (!raw) return fallback ?? '';

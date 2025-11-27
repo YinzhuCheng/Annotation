@@ -1,5 +1,6 @@
 import { getImageBlob } from './db';
 import { blobToDataUrl } from './blob';
+import { isRemoteImagePath, normalizeImagePath } from './fileHelpers';
 
 export async function resolveImageDataUrl(imagePath?: string | null): Promise<string | null> {
   const trimmed = imagePath?.trim();
@@ -10,19 +11,17 @@ export async function resolveImageDataUrl(imagePath?: string | null): Promise<st
     return trimmed;
   }
   let blob: Blob | undefined;
-  const isRemote =
-    /^https?:\/\//i.test(trimmed) || trimmed.toLowerCase().startsWith('blob:');
-  const normalized = isRemote || trimmed.startsWith('images/')
-    ? trimmed
-    : `images/${trimmed.replace(/^\/+/, '')}`;
+  const normalized = normalizeImagePath(trimmed);
   if (normalized.startsWith('images/')) {
     blob = await getImageBlob(normalized);
   }
   if (!blob) {
     try {
-      const response = await fetch(normalized);
-      if (response.ok) {
-        blob = await response.blob();
+      if (isRemoteImagePath(normalized) || normalized.startsWith('images/')) {
+        const response = await fetch(normalized);
+        if (response.ok) {
+          blob = await response.blob();
+        }
       }
     } catch {
       // Ignore network errors and fall through to return null
