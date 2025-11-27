@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../state/store';
+import type { ProblemRecord } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
@@ -9,10 +10,13 @@ import JSZip from 'jszip';
 import {
   buildBatchLabel,
   collectFilesFromItems,
+  ensureImagesPrefix,
   extractFilesFromClipboardData,
-  readClipboardFiles,
-  inferExtension,
   formatTimestamp,
+  inferExtension,
+  isRemoteImagePath,
+  normalizeImagePath,
+  readClipboardFiles,
   resolveImageFileName
 } from '../lib/fileHelpers';
 
@@ -32,7 +36,7 @@ type ImportedRowPreview = {
 
 export function ImportExport() {
   const { t } = useTranslation();
-  const { problems, upsertProblem, patchProblem } = useAppStore();
+  const { problems, upsertProblem, patchProblem, currentId } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageDirInputRef = useRef<HTMLInputElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
@@ -43,6 +47,8 @@ export function ImportExport() {
   const [xlsxContextMenu, setXlsxContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [imagesContextMenu, setImagesContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [activePasteTarget, setActivePasteTarget] = useState<'xlsx' | 'images' | null>(null);
+  const [isBatchRenaming, setIsBatchRenaming] = useState(false);
+  const [bulkRenameMessage, setBulkRenameMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const closeMenus = () => {
@@ -69,25 +75,136 @@ export function ImportExport() {
     el.setAttribute('directory', '');
   }, []);
 
+  const normalizeExportImagePath = (value: string): string => normalizeImagePath(value);
+  const normalizeImportedImagePath = (value: string): string => normalizeImagePath(value);
+  const normalizeProblemImageKey = (value: string): string => normalizeImagePath(value);
+
+  const rebuildImageBindings = (list: ProblemRecord[]): Record<string, string[]> => {
+    const bindings: Record<string, string[]> = {};
+    list.forEach((problem) => {
+      const key = normalizeProblemImageKey(problem.image);
+      if (!key) return;
+      if (!bindings[key]) bindings[key] = [];
+      bindings[key].push(problem.id);
+    });
+    return bindings;
+  };
+
+  const normalizeDroppedImagePath = (file: File): string => {
+    const raw = (file.webkitRelativePath || file.name || '').replace(/\\/g, '/');
+    if (!raw) return ensureImagesPrefix(file.name || '');
+    const lower = raw.toLowerCase();
+    const idx = lower.lastIndexOf('images/');
+    const sliced = idx !== -1 ? raw.slice(idx + 'images/'.length) : raw;
+    return ensureImagesPrefix(sliced.replace(/^\/+/, ''));
+  };
+
+  const dataUrlToBlob = (dataUrl: string): Blob => {
+    const [meta, payload] = dataUrl.split(',');
+    if (!payload) return new Blob();
+    const mimeMatch = meta?.match(/data:(.*?)(;base64)?$/);
+    const mime = mimeMatch?.[1] || 'application/octet-stream';
+    const binary = atob(payload);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  };
+
+  const fetchProblemImageBlob = async (path: string): Promise<Blob | null> => {
+    const trimmed = path?.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('data:')) {
+      return dataUrlToBlob(trimmed);
+    }
+    const normalized = normalizeImagePath(trimmed);
+    if (normalized.startsWith('images/')) {
+      const blob = await getImageBlob(normalized);
+      if (blob) return blob;
+    }
+    if (isRemoteImagePath(normalized)) {
+      try {
+        const response = await fetch(normalized);
+        if (response.ok) {
+          return await response.blob();
+        }
+      } catch {
+        // ignore network failures
+      }
+    }
+    return null;
+  };
+
+  const convertBlobToJpeg = async (blob: Blob): Promise<Blob> => {
+    if (blob.type === 'image/jpeg') return blob;
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('failed_to_load_image'));
+        image.src = url;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 1;
+      canvas.height = img.naturalHeight || img.height || 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvas_unsupported');
+      ctx.drawImage(img, 0, 0);
+      const jpegBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (result) => {
+            if (result) resolve(result);
+            else reject(new Error('jpeg_conversion_failed'));
+          },
+          'image/jpeg',
+          0.92,
+        );
+      });
+      return jpegBlob;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const clearImageBlockCaches = () => {
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('image-blocks-')) {
+          toRemove.push(key);
+        }
+      }
+      toRemove.forEach((key) => localStorage.removeItem(key));
+    } catch {
+      // best effort only
+    }
+  };
+
   const buildRows = () => problems
     .filter((p) => (p.question ?? '').trim().length > 0)
     .map(p => {
       const question = String(p.question ?? '');
       const questionType = p.questionType;
-      const optionsSerialized = questionType === 'Multiple Choice'
-        ? JSON.stringify((p.options || []).map((opt, i) => {
-            const label = String.fromCharCode(65 + i);
-            const trimmed = String(opt || '').trim();
-            if (!trimmed) return '';
-            const hasPrefix = new RegExp(`^${label}\s*:`).test(trimmed);
-            return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-          }))
-        : '';
+      const optionsSerialized = p.optionsRaw?.trim()
+        ? p.optionsRaw
+        : questionType === 'Multiple Choice'
+          ? JSON.stringify((p.options || []).map((opt, i) => {
+              const label = String.fromCharCode(65 + i);
+              const trimmed = String(opt || '').trim();
+              if (!trimmed) return '';
+              const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
+              return hasPrefix ? trimmed : `${label}: ${trimmed}`;
+            }))
+          : '';
       const answer = String(p.answer ?? '');
       const subfield = String(p.subfield ?? '');
       const source = String(p.source ?? '');
-      const imageName = resolveImageFileName(p.image);
-      const imageDependency = imageName ? 1 : 0;
+      const imagePath = normalizeExportImagePath(p.image);
+      const imageDependency = imagePath ? 1 : 0;
       const academicLevel = String(p.academicLevel ?? '');
       const difficulty = String(p.difficulty ?? '');
       return [
@@ -98,7 +215,7 @@ export function ImportExport() {
         answer,
         subfield,
         source,
-        imageName,
+        imagePath,
         imageDependency,
         academicLevel,
         difficulty
@@ -122,8 +239,12 @@ export function ImportExport() {
       const p = problems[i];
       if (!p.image) continue;
       const cellAddr = XLSX.utils.encode_cell({ r: i + 1, c: imageColIndex });
-      const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-      (ws as any)[cellAddr] = { t: 's', v: fileName, l: { Target: `images/${fileName}`, Tooltip: fileName } };
+      const exportPath = normalizeExportImagePath(p.image);
+      (ws as any)[cellAddr] = {
+        t: 's',
+        v: exportPath,
+        l: { Target: exportPath, Tooltip: exportPath },
+      };
     }
   };
 
@@ -153,15 +274,19 @@ export function ImportExport() {
       if (!p.image) continue;
       try {
         let blob: Blob | undefined;
-        if (p.image.startsWith('images/')) {
-          blob = (await getImageBlob(p.image)) as Blob | undefined;
+        const exportPath = normalizeExportImagePath(p.image);
+        if (!exportPath) continue;
+        if (exportPath.startsWith('images/')) {
+          blob = (await getImageBlob(exportPath)) as Blob | undefined;
         } else {
-          const r = await fetch(p.image);
+          const r = await fetch(exportPath);
           blob = await r.blob();
         }
         if (blob) {
-          const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-          zip.file(`images/${fileName}`, blob);
+          const targetPath = exportPath.startsWith('images/')
+            ? exportPath
+            : `images/${resolveImageFileName(exportPath, `${p.id}.jpg`)}`;
+          zip.file(targetPath, blob);
         }
       } catch {
         // ignore
@@ -177,15 +302,19 @@ export function ImportExport() {
       if (!p.image) continue;
       try {
         let blob: Blob | undefined;
-        if (p.image.startsWith('images/')) {
-          blob = (await getImageBlob(p.image)) as Blob | undefined;
+        const exportPath = normalizeExportImagePath(p.image);
+        if (!exportPath) continue;
+        if (exportPath.startsWith('images/')) {
+          blob = (await getImageBlob(exportPath)) as Blob | undefined;
         } else {
-          const r = await fetch(p.image);
+          const r = await fetch(exportPath);
           blob = await r.blob();
         }
         if (blob) {
-          const fileName = resolveImageFileName(p.image, `${p.id}.jpg`);
-          zip.file(fileName, blob);
+          const targetPath = exportPath.startsWith('images/')
+            ? exportPath
+            : `images/${resolveImageFileName(exportPath, `${p.id}.jpg`)}`;
+          zip.file(targetPath, blob);
         }
       } catch {
         // ignore missing blobs
@@ -218,9 +347,10 @@ export function ImportExport() {
       const id = String(row[findIndex('id')] || `${Date.now()}`);
       const question = String(row[findIndex('Question')] || '');
       const questionType = String(row[findIndex('Question_Type', 'Question_type')] || 'Multiple Choice') as any;
-      let options: string[] = [];
       const optionsIdx = findIndex('Options');
-      const optionsRaw = optionsIdx !== -1 ? row[optionsIdx] : undefined;
+      const optionsCell = optionsIdx !== -1 ? row[optionsIdx] : undefined;
+      const optionsRaw = typeof optionsCell === 'string' ? optionsCell : '';
+      let options: string[] = [];
       if (optionsRaw) {
         try { options = JSON.parse(optionsRaw); } catch {}
       }
@@ -238,18 +368,11 @@ export function ImportExport() {
       const subfield = String(row[findIndex('Subfield')] || '');
       const source = String(row[findIndex('Source')] || '');
       const imageRaw = String(row[findIndex('Image')] || '').trim();
-      let image = '';
-      if (imageRaw) {
-        if (imageRaw.includes('/') || imageRaw.includes('\\')) {
-          image = imageRaw;
-        } else {
-          image = `images/${imageRaw}`;
-        }
-      }
+      const image = normalizeImportedImagePath(imageRaw);
       const imageDependency = image ? 1 : 0;
       const academicLevel = String(row[findIndex('Academic_Level')] || 'K12') as any;
       const difficulty = String(row[findIndex('Difficulty')] || '1') as any;
-      upsertProblem({ id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
+      upsertProblem({ id, question, questionType, options, optionsRaw, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
       count++;
       if (!firstRow) {
         firstRow = { id, question, questionType, answer };
@@ -258,26 +381,107 @@ export function ImportExport() {
     return { count, firstRow };
   };
 
-  // Import images from dropped files/folders; filenames must be <id>.<ext>
-  const importImagesFromFiles = async (files: File[]): Promise<number> => {
+  // Import images from dropped files/folders; preserve dataset-relative paths when possible
+  const importImagesFromFiles = async (
+    files: File[],
+  ): Promise<{ count: number; matchedKeys: Set<string> }> => {
     let count = 0;
-    const setById = new Set(problems.map(p => p.id));
+    const matchedKeys = new Set<string>();
+    const problemsByImage = new Map<string, string[]>();
+    for (const p of problems) {
+      const key = normalizeProblemImageKey(p.image);
+      if (!key || isRemoteImagePath(key)) continue;
+      if (!problemsByImage.has(key)) {
+        problemsByImage.set(key, []);
+      }
+      problemsByImage.get(key)!.push(p.id);
+    }
+    const existingIds = new Set(problems.map((p) => p.id));
+
     for (const f of files) {
-      const baseName = (f.name || '').trim();
-      if (!baseName) continue;
+      const storagePath = normalizeDroppedImagePath(f);
+      if (!storagePath) continue;
       const extRaw = inferExtension(f, '').toLowerCase();
       if (!extRaw) continue;
       const normalizedExt = extRaw === 'jpeg' ? 'jpg' : extRaw;
       if (!ACCEPTED_IMAGE_EXT.includes(normalizedExt)) continue;
-      const dotIndex = baseName.lastIndexOf('.');
-      const id = dotIndex === -1 ? baseName : baseName.slice(0, dotIndex);
-      if (!id || !setById.has(id)) continue; // only update existing problems
-      const path = `images/${id}.${normalizedExt}`;
-      await saveImageBlobAtPath(path, f);
-      patchProblem(id, { image: path });
+      await saveImageBlobAtPath(storagePath, f);
+      const matchedProblems = problemsByImage.get(storagePath);
+      if (matchedProblems?.length) {
+        matchedKeys.add(storagePath);
+        matchedProblems.forEach((id) => patchProblem(id, { image: storagePath }));
+      } else {
+        const baseName = storagePath.split('/').pop() || storagePath;
+        const candidateId = baseName.includes('.')
+          ? baseName.slice(0, baseName.lastIndexOf('.'))
+          : baseName;
+        if (candidateId && existingIds.has(candidateId)) {
+          patchProblem(candidateId, { image: storagePath });
+        }
+      }
       count++;
     }
-    return count;
+    return { count, matchedKeys };
+  };
+
+  const handleBatchRename = async () => {
+    if (isBatchRenaming) return;
+    if (!window.confirm(t('bulkRenameConfirm'))) return;
+    setIsBatchRenaming(true);
+    setBulkRenameMessage(null);
+    try {
+      const snapshot = useAppStore.getState();
+      const sourceProblems = snapshot.problems;
+      if (sourceProblems.length === 0) {
+        setBulkRenameMessage(t('bulkRenameEmpty'));
+        setIsBatchRenaming(false);
+        return;
+      }
+      const base = formatTimestamp();
+      const renamed: ProblemRecord[] = [];
+      const idMap = new Map<string, string>();
+      for (let i = 0; i < sourceProblems.length; i++) {
+        const problem = sourceProblems[i];
+        const newId = `${base}-${i}`;
+        idMap.set(problem.id, newId);
+        let newImagePath = '';
+        if ((problem.image || '').trim()) {
+          const blob = await fetchProblemImageBlob(problem.image);
+          if (blob) {
+            const jpegBlob = await convertBlobToJpeg(blob);
+            newImagePath = `images/${newId}.jpg`;
+            await saveImageBlobAtPath(newImagePath, jpegBlob);
+          }
+        }
+        renamed.push({
+          ...problem,
+          id: newId,
+          image: newImagePath,
+          imageDependency: newImagePath ? 1 : 0,
+        });
+      }
+      clearImageBlockCaches();
+      const nextCurrentId = (() => {
+        const previous = snapshot.currentId;
+        if (!previous) return renamed[0]?.id ?? null;
+        return idMap.get(previous) ?? renamed[0]?.id ?? null;
+      })();
+      localStorage.setItem('problems', JSON.stringify(renamed));
+      if (nextCurrentId) {
+        localStorage.setItem('currentId', nextCurrentId);
+      } else {
+        localStorage.removeItem('currentId');
+      }
+      const bindings = rebuildImageBindings(renamed);
+      localStorage.setItem('image-bindings', JSON.stringify(bindings));
+      useAppStore.setState({ problems: renamed, currentId: nextCurrentId, imageBindings: bindings });
+      setBulkRenameMessage(t('bulkRenameSuccess', { count: renamed.length }));
+    } catch (error) {
+      console.error(error);
+      alert(t('bulkRenameError'));
+    } finally {
+      setIsBatchRenaming(false);
+    }
   };
 
   const isXlsxFile = (file: File) => {
@@ -347,13 +551,22 @@ export function ImportExport() {
     }
     const base = formatTimestamp();
     const label = buildBatchLabel('imgset', eligible.length, base);
-    const imported = await importImagesFromFiles(eligible);
+    const { count: imported, matchedKeys } = await importImagesFromFiles(eligible);
     if (imported > 0) {
       setImportedImagesCount(imported);
     } else {
       setImportedImagesCount(null);
     }
     setImagesDisplayName(label);
+    const snapshot = useAppStore.getState();
+    const bindings = snapshot.imageBindings || {};
+    Object.entries(bindings).forEach(([path, ids]) => {
+      if (!path || isRemoteImagePath(path)) return;
+      if (matchedKeys.has(path)) return;
+      ids.forEach((problemId) =>
+        patchProblem(problemId, { image: '', imageDependency: 0 }),
+      );
+    });
   };
 
   const ellipsize = (value: string, max: number) => (value.length > max ? `${value.slice(0, max)}...` : value);
@@ -433,6 +646,21 @@ export function ImportExport() {
         <button onClick={exportXlsx}>{t('exportXlsx')}</button>
         <button onClick={exportImages}>{t('exportImages')}</button>
         <button onClick={exportDatasets}>{t('exportDatasets')}</button>
+      </div>
+
+      <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+        <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+          <div>
+            <div className="label" style={{marginBottom:4}}>{t('bulkRenameTitle')}</div>
+            <div className="small" style={{color:'var(--text-muted)'}}>{t('bulkRenameHint')}</div>
+          </div>
+          <button onClick={handleBatchRename} disabled={isBatchRenaming}>
+            {isBatchRenaming ? t('bulkRenameWorking') : t('bulkRenameButton')}
+          </button>
+        </div>
+        {bulkRenameMessage && (
+          <span className="small" style={{color:'var(--text-muted)'}}>{bulkRenameMessage}</span>
+        )}
       </div>
 
       <div

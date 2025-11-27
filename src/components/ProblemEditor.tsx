@@ -28,6 +28,7 @@ import {
   ReviewAuditResult,
 } from "../lib/generator";
 import { resolveImageDataUrl } from "../lib/imageAttachments";
+import { normalizeImagePath } from "../lib/fileHelpers";
 import {
   buildDisplayName,
   collectFilesFromItems,
@@ -679,7 +680,46 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       file.type.startsWith("image/"),
     );
     if (!files.length) return;
-    e.preventDefault();
+
+    const target = (e.target as HTMLElement) ?? null;
+    const tagName = target?.tagName?.toLowerCase();
+    const inputType =
+      tagName === "input"
+        ? ((target as HTMLInputElement).type || "text").toLowerCase()
+        : "";
+    const nonTextInputTypes = [
+      "button",
+      "checkbox",
+      "color",
+      "date",
+      "datetime-local",
+      "file",
+      "hidden",
+      "image",
+      "month",
+      "number",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+      "time",
+      "week",
+    ];
+
+    const isTextLikeTarget =
+      tagName === "textarea" ||
+      (tagName === "input" && !nonTextInputTypes.includes(inputType)) ||
+      Boolean(target?.isContentEditable);
+
+    if (isTextLikeTarget) {
+      const clipboardText = e.clipboardData?.getData("text/plain") ?? "";
+      if (clipboardText.length > 0) {
+        return;
+      }
+    } else {
+      e.preventDefault();
+    }
+
     await onAddOcrImage(files[0]);
   };
 
@@ -1180,7 +1220,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           { length: count },
           (_, i) => current.options?.[i] ?? "",
         );
-        update({ options: next });
+        update({ options: next, optionsRaw: "" });
       }
     }
   };
@@ -1288,25 +1328,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   useEffect(() => {
     const currentPath = current.image?.trim();
-    if (!currentPath || !currentPath.startsWith("images/")) return;
-    const ext = currentPath.includes(".")
-      ? currentPath.substring(currentPath.lastIndexOf(".") + 1).toLowerCase()
-      : "jpg";
-    const normalizedExt = ext === "jpeg" ? "jpg" : ext;
-    const desiredPath = `images/${current.id}.${normalizedExt}`;
-    if (currentPath === desiredPath) return;
-    let cancelled = false;
-    (async () => {
-      const blob = await getImageBlob(currentPath);
-      if (!blob || cancelled) return;
-      await saveImageBlobAtPath(desiredPath, blob);
-      if (cancelled) return;
-      update({ image: desiredPath });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [current.image, current.id]);
+    if (!currentPath) return;
+    if (currentPath.startsWith("images/")) return;
+    const normalized = normalizeImagePath(currentPath);
+    if (normalized === currentPath) return;
+    update({ image: normalized });
+  }, [current.image]);
 
   useEffect(() => {
     if (!showPreview) return;
@@ -1711,7 +1738,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                       onChange={(e) => {
                         const next = [...(current.options || [])];
                         next[idx] = e.target.value;
-                        update({ options: next });
+                        update({ options: next, optionsRaw: "" });
                       }}
                       placeholder={String.fromCharCode(65 + idx)}
                     />
