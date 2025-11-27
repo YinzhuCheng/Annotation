@@ -189,15 +189,17 @@ export function ImportExport() {
     .map(p => {
       const question = String(p.question ?? '');
       const questionType = p.questionType;
-      const optionsSerialized = questionType === 'Multiple Choice'
-        ? JSON.stringify((p.options || []).map((opt, i) => {
-            const label = String.fromCharCode(65 + i);
-            const trimmed = String(opt || '').trim();
-            if (!trimmed) return '';
-            const hasPrefix = new RegExp(`^${label}\s*:`).test(trimmed);
-            return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-          }))
-        : '';
+      const optionsSerialized = p.optionsRaw?.trim()
+        ? p.optionsRaw
+        : questionType === 'Multiple Choice'
+          ? JSON.stringify((p.options || []).map((opt, i) => {
+              const label = String.fromCharCode(65 + i);
+              const trimmed = String(opt || '').trim();
+              if (!trimmed) return '';
+              const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
+              return hasPrefix ? trimmed : `${label}: ${trimmed}`;
+            }))
+          : '';
       const answer = String(p.answer ?? '');
       const subfield = String(p.subfield ?? '');
       const source = String(p.source ?? '');
@@ -345,9 +347,10 @@ export function ImportExport() {
       const id = String(row[findIndex('id')] || `${Date.now()}`);
       const question = String(row[findIndex('Question')] || '');
       const questionType = String(row[findIndex('Question_Type', 'Question_type')] || 'Multiple Choice') as any;
-      let options: string[] = [];
       const optionsIdx = findIndex('Options');
-      const optionsRaw = optionsIdx !== -1 ? row[optionsIdx] : undefined;
+      const optionsCell = optionsIdx !== -1 ? row[optionsIdx] : undefined;
+      const optionsRaw = typeof optionsCell === 'string' ? optionsCell : '';
+      let options: string[] = [];
       if (optionsRaw) {
         try { options = JSON.parse(optionsRaw); } catch {}
       }
@@ -369,7 +372,7 @@ export function ImportExport() {
       const imageDependency = image ? 1 : 0;
       const academicLevel = String(row[findIndex('Academic_Level')] || 'K12') as any;
       const difficulty = String(row[findIndex('Difficulty')] || '1') as any;
-      upsertProblem({ id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
+      upsertProblem({ id, question, questionType, options, optionsRaw, answer, subfield, source, image, imageDependency, academicLevel, difficulty });
       count++;
       if (!firstRow) {
         firstRow = { id, question, questionType, answer };

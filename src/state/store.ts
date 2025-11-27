@@ -174,6 +174,7 @@ export interface ProblemRecord {
   question: string;
   questionType: 'Multiple Choice' | 'Fill-in-the-blank' | 'Proof';
   options: string[]; // A.. variable length, default 5
+  optionsRaw: string;
   answer: string; // could be JSON for multi answers or proof latex
   subfield: string; // semicolon joined
   source: string;
@@ -282,6 +283,7 @@ const createEmptyProblem = (defaults: DefaultSettings): ProblemRecord => ({
   question: '',
   questionType: 'Multiple Choice',
   options: Array.from({ length: defaults.optionsCount }, () => ''),
+  optionsRaw: '',
   answer: '',
   subfield: '',
   source: '',
@@ -336,13 +338,14 @@ const normalizeProblem = (raw: any, defaults: DefaultSettings): ProblemRecord =>
   const source = typeof raw?.source === 'string' ? raw.source : '';
   const imageValue = typeof raw?.image === 'string' ? raw.image : '';
   const { image, imageDependency } = sanitizeProblemImage(imageValue);
+  const optionsRaw = typeof raw?.optionsRaw === 'string' ? raw.optionsRaw : '';
   const academicLevel = typeof raw?.academicLevel === 'string' ? raw.academicLevel : (defaults.academicLevels[0] ?? '');
   const difficulty = typeof raw?.difficulty === 'string'
     ? raw.difficulty
     : typeof raw?.difficulty === 'number'
       ? String(raw.difficulty)
       : (defaults.difficultyOptions[0] ?? '');
-  return { id, question, questionType, options, answer, subfield, source, image, imageDependency, academicLevel, difficulty };
+  return { id, question, questionType, options, optionsRaw, answer, subfield, source, image, imageDependency, academicLevel, difficulty };
 };
 
 const initialProblems: ProblemRecord[] = (() => {

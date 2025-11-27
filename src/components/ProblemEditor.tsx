@@ -1220,7 +1220,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           { length: count },
           (_, i) => current.options?.[i] ?? "",
         );
-        update({ options: next });
+        update({ options: next, optionsRaw: "" });
       }
     }
   };
@@ -1738,7 +1738,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                       onChange={(e) => {
                         const next = [...(current.options || [])];
                         next[idx] = e.target.value;
-                        update({ options: next });
+                        update({ options: next, optionsRaw: "" });
                       }}
                       placeholder={String.fromCharCode(65 + idx)}
                     />
