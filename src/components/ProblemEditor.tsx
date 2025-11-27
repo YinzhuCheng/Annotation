@@ -679,7 +679,46 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       file.type.startsWith("image/"),
     );
     if (!files.length) return;
-    e.preventDefault();
+
+    const target = (e.target as HTMLElement) ?? null;
+    const tagName = target?.tagName?.toLowerCase();
+    const inputType =
+      tagName === "input"
+        ? ((target as HTMLInputElement).type || "text").toLowerCase()
+        : "";
+    const nonTextInputTypes = [
+      "button",
+      "checkbox",
+      "color",
+      "date",
+      "datetime-local",
+      "file",
+      "hidden",
+      "image",
+      "month",
+      "number",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+      "time",
+      "week",
+    ];
+
+    const isTextLikeTarget =
+      tagName === "textarea" ||
+      (tagName === "input" && !nonTextInputTypes.includes(inputType)) ||
+      Boolean(target?.isContentEditable);
+
+    if (isTextLikeTarget) {
+      const clipboardText = e.clipboardData?.getData("text/plain") ?? "";
+      if (clipboardText.length > 0) {
+        return;
+      }
+    } else {
+      e.preventDefault();
+    }
+
     await onAddOcrImage(files[0]);
   };
 
