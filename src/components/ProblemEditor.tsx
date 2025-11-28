@@ -238,6 +238,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     | null
     | "generate"
     | "review"
+    | "latex_all"
     | "latex_question"
     | "latex_answer"
     | "latex_preview"
@@ -1212,11 +1213,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return false;
   };
 
-  const fixLatex = async (field: "question" | "answer") => {
+  const fixLatex = async (
+    field: "question" | "answer",
+    options?: { skipAgentCheck?: boolean; agent?: LLMAgentSettings },
+  ) => {
     const text = (current as any)[field] as string;
     if (!text?.trim() && field !== "answer") return;
     if (field === "answer" && !combinedOptionsAndAnswerFilled) return;
-    if (!ensureAgent("latex")) return;
+    if (!options?.skipAgentCheck && !ensureAgent("latex")) return;
     setLlmStatusSource(
       field === "question" ? "latex_question" : "latex_answer",
     );
@@ -1235,7 +1239,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       undefined,
       contextLabel,
     );
-    const latexAgent = getAgentSettings("latex");
+    const latexAgent = options?.agent ?? getAgentSettings("latex");
     const corrected = (
       await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
@@ -1260,6 +1264,27 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       update(patch);
     }
     setLlmStatus("done");
+  };
+
+  const fixLatexAll = async () => {
+    const hasQuestion = Boolean(current.question?.trim());
+    const hasAnswerBundle = combinedOptionsAndAnswerFilled;
+    if (!hasQuestion && !hasAnswerBundle) return;
+    if (!ensureAgent("latex")) return;
+    const latexAgent = getAgentSettings("latex");
+    setLlmStatusSource("latex_all");
+    setLlmStatus("waiting_response");
+    try {
+      if (hasQuestion) {
+        await fixLatex("question", { skipAgentCheck: true, agent: latexAgent });
+      }
+      if (hasAnswerBundle) {
+        await fixLatex("answer", { skipAgentCheck: true, agent: latexAgent });
+      }
+      setLlmStatus("done");
+    } finally {
+      setLlmStatusSource(null);
+    }
   };
 
   const buildAutoReviewFeedback = (
@@ -1741,6 +1766,16 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     () => formatOptionFragmentsSummary(optionFixFragments),
     [optionFixFragments],
   );
+  const canRunLatexAll =
+    Boolean((current.question ?? "").trim()) || combinedOptionsAndAnswerFilled;
+  const latexFixBusySources = useMemo(
+    () => ["latex_question", "latex_answer", "latex_all"],
+    [],
+  );
+  const isLatexFixBusy =
+    latexFixBusySources.includes(llmStatusSource ?? "") &&
+    llmStatus !== "idle" &&
+    llmStatus !== "done";
 
   useEffect(() => {
     ensureOptionsForMC();
@@ -2160,21 +2195,19 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 }}
               >
                 <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button onClick={() => fixLatex("question")}>
-                    {t("latexFix")}
+                  <button onClick={fixLatexAll} disabled={!canRunLatexAll}>
+                    {t("latexFixAll")}
                   </button>
-                  {llmStatusSource === "latex_question" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
+                  {isLatexFixBusy && (
+                    <span className="small">
+                      {llmStatus === "waiting_response"
+                        ? t("waitingLLMResponse")
+                        : t("waitingLLMThinking")}
+                      {dotPattern}
+                    </span>
+                  )}
                 </div>
-                <span className="small">{t("latexFixHint")}</span>
+                <span className="small">{t("latexFixAllHint")}</span>
               </div>
               <div style={{ marginTop: 8 }}>
                 <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -2430,33 +2463,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 value={current.answer}
                 onChange={(e) => update({ answer: e.target.value })}
               />
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button
-                    onClick={() => fixLatex("answer")}
-                    disabled={!combinedOptionsAndAnswerFilled}
-                  >
-                    {t("latexFix")}
-                  </button>
-                  {llmStatusSource === "latex_answer" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
-                </div>
-                <span className="small">{t("latexFixHint")}</span>
-              </div>
               <div style={{ marginTop: 8 }}>
                 <div className="small" style={{ color: "var(--text-muted)" }}>
                   {t("mathJaxPreviewLabel")}
