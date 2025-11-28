@@ -8,7 +8,7 @@ export interface OptionFragment {
   source: OptionFragmentSource;
 }
 
-export const DEFAULT_OPTION_PLACEHOLDER = '\\';
+export const DEFAULT_OPTION_PLACEHOLDER = '//';
 
 const toOptionLabel = (index: number): string => {
   const bounded = Math.max(0, Math.min(LETTERS.length - 1, index));
@@ -145,12 +145,26 @@ export function extractOptionFragments(raw: string | string[] | null): OptionFra
 export const formatOptionFragmentsSummary = (fragments: OptionFragment[]): string[] =>
   fragments.map((frag) => `${frag.label} -> ${frag.text || '<empty>'}`);
 
-const ANSWER_REGEX = /[A-Z]/i;
-
-const sanitizeAnswerLetter = (value: string | null | undefined): string => {
-  if (!value) return '';
-  const match = String(value).match(ANSWER_REGEX);
-  return match ? match[0].toUpperCase() : '';
+const sanitizeAnswerList = (value: string | null | undefined): string[] => {
+  if (value == null) return [];
+  const raw = String(value).trim();
+  if (!raw) return [];
+  const parsedArray = normalizeJsonLikeArray(raw);
+  const sourceTokens =
+    parsedArray && parsedArray.length > 0
+      ? parsedArray
+      : raw
+          .split(/[^A-Za-z]+/)
+          .map((token) => token.trim())
+          .filter(Boolean);
+  const letters: string[] = [];
+  sourceTokens.forEach((token) => {
+    const normalized = normalizeLabel(token);
+    if (normalized && !letters.includes(normalized)) {
+      letters.push(normalized);
+    }
+  });
+  return letters;
 };
 
 export function enforceOptionCount(
@@ -164,10 +178,14 @@ export function enforceOptionCount(
   const normalized = new Map<string, string>();
   const leftovers: OptionFragment[] = [];
   const seen = new Set<string>();
+  const fragmentLookup = new Map<string, OptionFragment>();
 
   fragments.forEach((fragment) => {
     const label = normalizeLabel(fragment.label);
     const body = sanitizeText(fragment.text || '');
+    if (label) {
+      fragmentLookup.set(label, fragment);
+    }
     if (!body) return;
     if (label && labels.includes(label) && !seen.has(label)) {
       normalized.set(label, body);
@@ -177,22 +195,27 @@ export function enforceOptionCount(
     }
   });
 
-  let answer = sanitizeAnswerLetter(answerRaw);
-  if (!answer) answer = labels[0];
+  let answerLetters = sanitizeAnswerList(answerRaw);
+  if (answerLetters.length === 0) answerLetters = [labels[0]];
 
-  if (!labels.includes(answer)) {
-    const candidate = fragments.find((fragment) => normalizeLabel(fragment.label) === answer);
-    if (candidate) {
-      const available = labels.filter((label) => !normalized.has(label));
-      const target = available.length > 0
-        ? available[Math.floor(Math.random() * available.length)]
-        : labels[Math.floor(Math.random() * labels.length)];
-      normalized.set(target, sanitizeText(candidate.text));
-      answer = target;
-    } else {
-      answer = labels[0];
+  const ensureSlotForFragment = (sourceLabel: string): string => {
+    const available = labels.find((label) => !normalized.has(label));
+    const target = available ?? labels[0];
+    if (!normalized.has(target)) {
+      const fragment = fragmentLookup.get(sourceLabel);
+      if (fragment?.text?.trim()) {
+        normalized.set(target, sanitizeText(fragment.text));
+      } else {
+        normalized.set(target, placeholder);
+      }
     }
-  }
+    return target;
+  };
+
+  answerLetters = answerLetters.map((letter) => {
+    if (labels.includes(letter)) return letter;
+    return ensureSlotForFragment(letter);
+  });
 
   labels.forEach((label) => {
     if (!normalized.has(label)) {
@@ -206,11 +229,25 @@ export function enforceOptionCount(
   });
 
   const options = labels.map((label) => normalized.get(label) || placeholder);
-  let answerIndex = labels.indexOf(answer);
-  if (answerIndex === -1 || !options[answerIndex] || !options[answerIndex].trim()) {
-    answerIndex = options.findIndex((option) => option && option.trim());
-    answer = answerIndex === -1 ? labels[0] : labels[answerIndex];
-  }
+  const validAnswerLetters = answerLetters
+    .map((letter) => (labels.includes(letter) ? letter : labels[0]))
+    .filter((letter, idx, arr) => arr.indexOf(letter) === idx)
+    .filter((letter) => {
+      const option = options[labels.indexOf(letter)] || '';
+      return option.trim().length > 0 && option.trim() !== placeholder;
+    });
+  const finalAnswers =
+    validAnswerLetters.length > 0
+      ? validAnswerLetters
+      : [
+          (() => {
+            const fallbackIndex = options.findIndex(
+              (option) => option.trim().length > 0 && option.trim() !== placeholder,
+            );
+            return fallbackIndex === -1 ? labels[0] : labels[fallbackIndex];
+          })(),
+        ];
+  const answer = finalAnswers.join(',');
 
   return { options, answer };
 }

@@ -1215,15 +1215,20 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
 
   const fixLatex = async (
     field: "question" | "answer",
-    options?: { skipAgentCheck?: boolean; agent?: LLMAgentSettings },
+    options?: {
+      skipAgentCheck?: boolean;
+      agent?: LLMAgentSettings;
+      statusSource?: "latex_question" | "latex_answer" | "latex_all";
+    },
   ) => {
     const text = (current as any)[field] as string;
     if (!text?.trim() && field !== "answer") return;
     if (field === "answer" && !combinedOptionsAndAnswerFilled) return;
     if (!options?.skipAgentCheck && !ensureAgent("latex")) return;
-    setLlmStatusSource(
-      field === "question" ? "latex_question" : "latex_answer",
-    );
+    const statusSource =
+      options?.statusSource ??
+      (field === "question" ? "latex_question" : "latex_answer");
+    setLlmStatusSource(statusSource);
     const contextLabel =
       field === "question"
         ? "Question field"
@@ -1264,6 +1269,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       update(patch);
     }
     setLlmStatus("done");
+    if (!options?.statusSource) {
+      setLlmStatusSource(null);
+    }
   };
 
   const fixLatexAll = async () => {
