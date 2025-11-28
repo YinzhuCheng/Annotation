@@ -40,6 +40,13 @@ import {
   readClipboardFiles,
   resolveImageFileName,
 } from "../lib/fileHelpers";
+import {
+  DEFAULT_OPTION_PLACEHOLDER,
+  extractOptionFragments,
+  enforceOptionCount,
+  formatOptionFragmentsSummary,
+} from "../lib/optionsCorrection";
+import type { OptionFragment } from "../lib/optionsCorrection";
 
 type GeneratorTurnState = GeneratorConversationTurn & {
   patch: Partial<ProblemRecord>;
@@ -48,6 +55,9 @@ type GeneratorTurnState = GeneratorConversationTurn & {
 };
 
 type QAHistoryTurn = ChatMessage & { timestamp: number };
+
+type OptionFixTurn = { role: "user" | "assistant"; content: string; timestamp: number };
+type OptionFixUndoSnapshot = { options: string[]; answer: string; optionsRaw: string };
 
 type NavDirection = "prev" | "next";
 
@@ -228,6 +238,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     | null
     | "generate"
     | "review"
+    | "latex_all"
     | "latex_question"
     | "latex_answer"
     | "latex_preview"
@@ -295,6 +306,19 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     "idle" | "waiting_response" | "thinking" | "responding" | "done"
   >("idle");
   const [qaError, setQaError] = useState("");
+  const [optionFixRaw, setOptionFixRaw] = useState("");
+  const [optionFixConversation, setOptionFixConversation] = useState<OptionFixTurn[]>([]);
+  const [optionFixStatus, setOptionFixStatus] = useState<
+    "idle" | "waiting_response" | "thinking" | "responding" | "done"
+  >("idle");
+  const [optionFixError, setOptionFixError] = useState("");
+  const [optionFixFeedback, setOptionFixFeedback] = useState("");
+  const [optionFixNotices, setOptionFixNotices] = useState<string[]>([]);
+  const [optionFixUndoVersion, setOptionFixUndoVersion] = useState(0);
+  const optionFixSessionsRef = useRef<
+    Record<string, { raw: string; conversation: OptionFixTurn[] }>
+  >({});
+  const optionFixUndoRef = useRef<Map<string, OptionFixUndoSnapshot>>(new Map());
   const [latexInput, setLatexInput] = useState("");
   const [latexRenderError, setLatexRenderError] = useState("");
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
@@ -484,6 +508,230 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return { options: updated, answer: answerText };
   };
 
+  const buildInitialOptionFixSource = () => {
+    if (current.questionType !== "Multiple Choice") return "";
+    const cached = current.optionsRaw?.trim();
+    if (cached) return cached;
+    const fallback = (current.options || [])
+      .map((opt, idx) => {
+        const body = (opt ?? "").trim();
+        return body ? `${getOptionLabel(idx)}: ${body}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+    return fallback;
+  };
+
+  const buildOptionFixSystemPrompt = (targetCount: number): string => {
+    const finalLabel = getOptionLabel(targetCount - 1);
+    return [
+      "You normalize multiple-choice options so they follow strict labeling rules.",
+      "Always respond with JSON using double quotes:",
+      '{"options":[{"label":"A","text":"..."}],"answer":"A","notes":""}',
+      `Produce exactly ${targetCount} options labeled sequentially from A to ${finalLabel}.`,
+      `Preserve MathJax commands, punctuation, and ordering whenever possible.`,
+      `If there are fewer than ${targetCount} candidates, fill the remaining slots with a single backslash (\\\\).`,
+      `If there are more than ${targetCount}, drop extra options beyond ${finalLabel} unless the correct answer sits outside that range—move that option (its text and correctness) into a random slot within A-${finalLabel} first.`,
+      "Return notes only if there is important context; never add commentary outside the JSON.",
+    ].join("\n");
+  };
+
+  const buildOptionFixContextMessage = (
+    rawSource: string,
+    heuristicsSummary: string[],
+    targetCount: number,
+  ): string => {
+    const finalLabel = getOptionLabel(targetCount - 1);
+    const questionPreview = (current.question ?? "").trim().slice(0, 800);
+    const structuredOptions = (current.options || [])
+      .map((opt, idx) => `${getOptionLabel(idx)}: ${(opt ?? "").trim() || "<empty>"}`)
+      .join("\n");
+    const heuristicsBlock =
+      heuristicsSummary.length > 0 ? heuristicsSummary.join("\n") : "<none>";
+    const existingAnswer = current.answer?.trim() || "<empty>";
+    return [
+      "Question preview:",
+      questionPreview || "<empty>",
+      "",
+      `Existing structured answer: ${existingAnswer}`,
+      structuredOptions ? ["Current stored options:", structuredOptions].join("\n") : "",
+      "",
+      "Raw option cache:",
+      rawSource || "<empty>",
+      "",
+      "Heuristic extraction:",
+      heuristicsBlock,
+      "",
+      "Rules:",
+      `1. Output exactly ${targetCount} labeled options (A-${finalLabel}).`,
+      `2. Preserve math/latex content verbatim; only fix obvious spacing.`,
+      `3. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
+      `4. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
+      '5. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  const buildOptionFixFeedbackMessage = (
+    feedback: string,
+    rawSource: string,
+    heuristicsSummary: string[],
+  ): string => {
+    const heuristicsBlock =
+      heuristicsSummary.length > 0 ? heuristicsSummary.join("\n") : "<none>";
+    return [
+      "User feedback about the previous JSON:",
+      feedback,
+      "",
+      "Original raw reference:",
+      rawSource || "<empty>",
+      "",
+      "Heuristic extraction:",
+      heuristicsBlock,
+      "",
+      "Update the JSON while keeping the earlier constraints.",
+    ].join("\n");
+  };
+
+  const extractOptionFixJson = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const tryParse = (candidate: string) => {
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch {
+        return null;
+      }
+    };
+    const direct = tryParse(trimmed);
+    if (direct) return direct;
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+      const payload = tryParse(fenced[1].trim());
+      if (payload) return payload;
+    }
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      return tryParse(trimmed.slice(firstBrace, lastBrace + 1));
+    }
+    return null;
+  };
+
+  const parseOptionFixResponse = (
+    raw: string,
+  ): { fragments: OptionFragment[]; answer: string; notes?: string } | null => {
+    const payload = extractOptionFixJson(raw);
+    if (!payload) return null;
+    try {
+      const parsed = JSON.parse(payload);
+      const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
+      const fragments: OptionFragment[] = rawOptions.map(
+        (entry: any, idx: number): OptionFragment => {
+          if (typeof entry === "string") {
+            return { label: getOptionLabel(idx), text: entry, source: "sequence" };
+          }
+          const label =
+            typeof entry?.label === "string" ? entry.label : getOptionLabel(idx);
+          const text =
+            typeof entry?.text === "string"
+              ? entry.text
+              : String(entry?.text ?? entry ?? "");
+          return { label, text, source: "labeled" };
+        },
+      );
+      const answer =
+        typeof parsed.answer === "string" ? parsed.answer : current.answer ?? "";
+      const notes = typeof parsed.notes === "string" ? parsed.notes : undefined;
+      return { fragments, answer, notes };
+    } catch {
+      return null;
+    }
+  };
+
+  const maybeNormalizeOptionFixResult = async (
+    options: string[],
+    answer: string,
+  ): Promise<{ options: string[]; answer: string; normalized: boolean }> => {
+    const latexAgent = getAgentSettings("latex");
+    if (!hasValidConfig(latexAgent?.config)) {
+      return { options, answer, normalized: false };
+    }
+    try {
+      const snippet = buildOptionsAnswerSnippet(answer, options);
+      const payload = composeLatexCorrectionInput(
+        snippet,
+        undefined,
+        "Options and answer section",
+      );
+      const corrected = await latexCorrection(payload, latexAgent, {
+        onStatus: (s) => {
+          setOptionFixStatus(s);
+          setLlmStatus(s);
+        },
+      });
+      const parsed = parseOptionsAnswerSnippet(corrected);
+      return {
+        options: parsed.options ?? options,
+        answer: parsed.answer || answer,
+        normalized: true,
+      };
+    } catch {
+      return { options, answer, normalized: false };
+    }
+  };
+
+  const applyOptionFixResult = async (
+    rawResponse: string | null,
+    fallbackFragments: OptionFragment[],
+    rawSource: string,
+  ) => {
+    let notices: string[] = [];
+    const parsed = rawResponse ? parseOptionFixResponse(rawResponse) : null;
+    let fragmentsToUse =
+      parsed?.fragments && parsed.fragments.length > 0
+        ? parsed.fragments
+        : fallbackFragments;
+    if (!parsed && rawResponse) {
+      notices.push(t("optionFixNoticeHeuristics"));
+    }
+    if (!fragmentsToUse.length) {
+      throw new Error(t("optionFixParseError"));
+    }
+    const enforced = enforceOptionCount(
+      fragmentsToUse,
+      parsed?.answer || current.answer || "",
+      optionFixTargetCount,
+      DEFAULT_OPTION_PLACEHOLDER,
+    );
+    let nextOptions = enforced.options;
+    let nextAnswer = enforced.answer;
+    const normalization = await maybeNormalizeOptionFixResult(
+      nextOptions,
+      nextAnswer,
+    );
+    nextOptions = normalization.options;
+    nextAnswer = normalization.answer;
+    if (!normalization.normalized && !hasValidConfig(getAgentSettings("latex").config)) {
+      notices.push(t("optionFixNoticeLatexSkipped"));
+    }
+    if (parsed?.notes) {
+      notices = [...notices, parsed.notes];
+    }
+    optionFixUndoRef.current.set(current.id, {
+      options: [...(current.options || [])],
+      answer: current.answer ?? "",
+      optionsRaw: current.optionsRaw ?? "",
+    });
+    setOptionFixUndoVersion((v) => v + 1);
+    update({ options: nextOptions, answer: nextAnswer, optionsRaw: rawSource });
+    setOptionFixNotices(
+      notices.filter((note, idx, arr) => note && arr.indexOf(note) === idx),
+    );
+  };
+
   const hasOptionsOrAnswerContent = () => {
     const answerHasContent = Boolean(
       current.answer && current.answer.trim().length > 0,
@@ -521,6 +769,45 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     setQaStatus("idle");
     setQaError("");
   }, [current.id]);
+
+  useEffect(() => {
+    if (current.questionType !== "Multiple Choice") {
+      setOptionFixRaw("");
+      setOptionFixConversation([]);
+      setOptionFixStatus("idle");
+      setOptionFixError("");
+      setOptionFixFeedback("");
+      setOptionFixNotices([]);
+      return;
+    }
+    const saved = optionFixSessionsRef.current[current.id];
+    if (saved) {
+      setOptionFixRaw(saved.raw);
+      setOptionFixConversation(saved.conversation);
+    } else {
+      setOptionFixRaw(buildInitialOptionFixSource());
+      setOptionFixConversation([]);
+    }
+    setOptionFixStatus("idle");
+    setOptionFixError("");
+    setOptionFixFeedback("");
+    setOptionFixNotices([]);
+  }, [current.id, current.questionType]);
+
+  useEffect(() => {
+    if (current.questionType !== "Multiple Choice") return;
+    const saved = optionFixSessionsRef.current[current.id];
+    if (saved) return;
+    setOptionFixRaw(buildInitialOptionFixSource());
+  }, [current.id, current.optionsRaw, current.options, current.questionType]);
+
+  useEffect(() => {
+    if (current.questionType !== "Multiple Choice") return;
+    optionFixSessionsRef.current[current.id] = {
+      raw: optionFixRaw,
+      conversation: optionFixConversation,
+    };
+  }, [current.id, current.questionType, optionFixRaw, optionFixConversation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -926,14 +1213,22 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return false;
   };
 
-  const fixLatex = async (field: "question" | "answer") => {
+  const fixLatex = async (
+    field: "question" | "answer",
+    options?: {
+      skipAgentCheck?: boolean;
+      agent?: LLMAgentSettings;
+      statusSource?: "latex_question" | "latex_answer" | "latex_all";
+    },
+  ) => {
     const text = (current as any)[field] as string;
     if (!text?.trim() && field !== "answer") return;
     if (field === "answer" && !combinedOptionsAndAnswerFilled) return;
-    if (!ensureAgent("latex")) return;
-    setLlmStatusSource(
-      field === "question" ? "latex_question" : "latex_answer",
-    );
+    if (!options?.skipAgentCheck && !ensureAgent("latex")) return;
+    const statusSource =
+      options?.statusSource ??
+      (field === "question" ? "latex_question" : "latex_answer");
+    setLlmStatusSource(statusSource);
     const contextLabel =
       field === "question"
         ? "Question field"
@@ -949,7 +1244,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       undefined,
       contextLabel,
     );
-    const latexAgent = getAgentSettings("latex");
+    const latexAgent = options?.agent ?? getAgentSettings("latex");
     const corrected = (
       await latexCorrection(payload, latexAgent, {
         onStatus: (s) => setLlmStatus(s),
@@ -974,6 +1269,30 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       update(patch);
     }
     setLlmStatus("done");
+    if (!options?.statusSource) {
+      setLlmStatusSource(null);
+    }
+  };
+
+  const fixLatexAll = async () => {
+    const hasQuestion = Boolean(current.question?.trim());
+    const hasAnswerBundle = combinedOptionsAndAnswerFilled;
+    if (!hasQuestion && !hasAnswerBundle) return;
+    if (!ensureAgent("latex")) return;
+    const latexAgent = getAgentSettings("latex");
+    setLlmStatusSource("latex_all");
+    setLlmStatus("waiting_response");
+    try {
+      if (hasQuestion) {
+        await fixLatex("question", { skipAgentCheck: true, agent: latexAgent });
+      }
+      if (hasAnswerBundle) {
+        await fixLatex("answer", { skipAgentCheck: true, agent: latexAgent });
+      }
+      setLlmStatus("done");
+    } finally {
+      setLlmStatusSource(null);
+    }
   };
 
   const buildAutoReviewFeedback = (
@@ -1237,6 +1556,106 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     }
   };
 
+  const optionFixBusy =
+    optionFixStatus !== "idle" && optionFixStatus !== "done";
+  const canUndoOptionFix = useMemo(
+    () => optionFixUndoRef.current.has(current.id),
+    [optionFixUndoVersion, current.id],
+  );
+
+  const runOptionFix = async (mode: "convert" | "feedback") => {
+    if (current.questionType !== "Multiple Choice") return;
+    const effectiveRaw = (optionFixRaw || buildInitialOptionFixSource()).trim();
+    if (!effectiveRaw) {
+      alert(t("optionFixRawMissing"));
+      return;
+    }
+    if (mode === "feedback") {
+      if (optionFixConversation.length === 0) {
+        alert(t("optionFixFeedbackDisabled"));
+        return;
+      }
+      if (!optionFixFeedback.trim()) return;
+    }
+    if (!ensureAgent("generator")) return;
+    const generatorAgent = getAgentSettings("generator");
+    setLlmStatusSource("option_fix");
+    setOptionFixError("");
+    setOptionFixNotices([]);
+    const heuristics =
+      optionFixFragments.length > 0
+        ? optionFixFragments
+        : extractOptionFragments(effectiveRaw);
+    const heuristicsSummary =
+      heuristics.length > 0 ? formatOptionFragmentsSummary(heuristics) : [];
+    const systemPrompt = buildOptionFixSystemPrompt(optionFixTargetCount);
+    const baseConversation =
+      mode === "convert" ? [] : optionFixConversation;
+    const userMessage =
+      mode === "convert"
+        ? buildOptionFixContextMessage(
+            effectiveRaw,
+            heuristicsSummary,
+            optionFixTargetCount,
+          )
+        : buildOptionFixFeedbackMessage(
+            optionFixFeedback.trim(),
+            effectiveRaw,
+            heuristicsSummary,
+          );
+    try {
+      const response = await chatStream(
+        [
+          { role: "system", content: systemPrompt },
+          ...baseConversation.map((turn) => ({
+            role: turn.role,
+            content: turn.content,
+          })),
+          { role: "user", content: userMessage },
+        ],
+        generatorAgent.config,
+        { temperature: 0 },
+        {
+          onStatus: (s) => {
+            setOptionFixStatus(s);
+            setLlmStatus(s);
+          },
+        },
+      );
+      const timestamp = Date.now();
+      const updatedConversation: OptionFixTurn[] = [
+        ...baseConversation,
+        { role: "user", content: userMessage, timestamp },
+        { role: "assistant", content: response, timestamp: timestamp + 1 },
+      ];
+      setOptionFixConversation(updatedConversation);
+      optionFixSessionsRef.current[current.id] = {
+        raw: optionFixRaw,
+        conversation: updatedConversation,
+      };
+      await applyOptionFixResult(response, heuristics, effectiveRaw);
+      setOptionFixFeedback("");
+    } catch (err: any) {
+      setOptionFixError(err?.message ? String(err.message) : String(err));
+    } finally {
+      setOptionFixStatus("done");
+      setLlmStatus("done");
+      setLlmStatusSource(null);
+    }
+  };
+
+  const handleOptionFixUndo = () => {
+    const snapshot = optionFixUndoRef.current.get(current.id);
+    if (!snapshot) return;
+    update({
+      options: [...snapshot.options],
+      answer: snapshot.answer,
+      optionsRaw: snapshot.optionsRaw,
+    });
+    optionFixUndoRef.current.delete(current.id);
+    setOptionFixUndoVersion((v) => v + 1);
+  };
+
   const loadLatexFrom = (field: "question" | "answer") => {
     if (field === "answer") {
       const snippet = buildOptionsAnswerSnippet(
@@ -1340,6 +1759,31 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   };
 
   const combinedOptionsAndAnswerFilled = hasOptionsOrAnswerContent();
+  const optionFixTargetCount = useMemo(
+    () => Math.max(5, defaults.optionsCount || 5),
+    [defaults.optionsCount],
+  );
+  const optionFixFragments = useMemo<OptionFragment[]>(
+    () =>
+      current.questionType === "Multiple Choice"
+        ? extractOptionFragments(optionFixRaw || buildInitialOptionFixSource())
+        : [],
+    [current.questionType, optionFixRaw],
+  );
+  const optionFixHeuristicSummary = useMemo(
+    () => formatOptionFragmentsSummary(optionFixFragments),
+    [optionFixFragments],
+  );
+  const canRunLatexAll =
+    Boolean((current.question ?? "").trim()) || combinedOptionsAndAnswerFilled;
+  const latexFixBusySources = useMemo(
+    () => ["latex_question", "latex_answer", "latex_all"],
+    [],
+  );
+  const isLatexFixBusy =
+    latexFixBusySources.includes(llmStatusSource ?? "") &&
+    llmStatus !== "idle" &&
+    llmStatus !== "done";
 
   useEffect(() => {
     ensureOptionsForMC();
@@ -1759,21 +2203,19 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 }}
               >
                 <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button onClick={() => fixLatex("question")}>
-                    {t("latexFix")}
+                  <button onClick={fixLatexAll} disabled={!canRunLatexAll}>
+                    {t("latexFixAll")}
                   </button>
-                  {llmStatusSource === "latex_question" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
+                  {isLatexFixBusy && (
+                    <span className="small">
+                      {llmStatus === "waiting_response"
+                        ? t("waitingLLMResponse")
+                        : t("waitingLLMThinking")}
+                      {dotPattern}
+                    </span>
+                  )}
                 </div>
-                <span className="small">{t("latexFixHint")}</span>
+                <span className="small">{t("latexFixAllHint")}</span>
               </div>
               <div style={{ marginTop: 8 }}>
                 <div className="small" style={{ color: "var(--text-muted)" }}>
@@ -1858,6 +2300,165 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                     />
                   ))}
                 </div>
+                <div className="card" style={{ marginTop: 12 }}>
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <div className="label">{t("optionFixTitle")}</div>
+                      <div className="small" style={{ color: "var(--text-muted)" }}>
+                        {t("optionFixHint")}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => runOptionFix("convert")}
+                        disabled={optionFixBusy}
+                      >
+                        {optionFixBusy ? t("optionFixBusy") : t("optionFixConvert")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOptionFixUndo}
+                        disabled={!canUndoOptionFix}
+                      >
+                        {t("optionFixUndo")}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <div className="label" style={{ marginBottom: 4 }}>
+                      {t("optionFixRawLabel")}
+                    </div>
+                    <textarea
+                      rows={5}
+                      value={optionFixRaw}
+                      onChange={(e) => setOptionFixRaw(e.target.value)}
+                      placeholder={t("optionFixRawPlaceholder")}
+                      style={{
+                        width: "100%",
+                        fontFamily: "var(--font-mono, monospace)",
+                      }}
+                    />
+                    <div
+                      className="small"
+                      style={{ marginTop: 4, color: "var(--text-muted)" }}
+                    >
+                      {t("optionFixRulesLabel")}
+                    </div>
+                    {optionFixHeuristicSummary.length > 0 ? (
+                      <ul className="small" style={{ marginTop: 4, paddingLeft: 20 }}>
+                        {optionFixHeuristicSummary.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div
+                        className="small"
+                        style={{ marginTop: 4, color: "var(--text-muted)" }}
+                      >
+                        {t("optionFixRulesEmpty")}
+                      </div>
+                    )}
+                  </div>
+                  {optionFixError && (
+                    <div
+                      className="small"
+                      style={{ marginTop: 8, color: "#f87171" }}
+                    >
+                      {optionFixError}
+                    </div>
+                  )}
+                  {optionFixNotices.length > 0 && (
+                    <div
+                      className="small"
+                      style={{ marginTop: 8, color: "var(--text-muted)" }}
+                    >
+                      {optionFixNotices.map((notice) => (
+                        <div key={notice}>{notice}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 12 }}>
+                    <div className="label" style={{ marginBottom: 4 }}>
+                      {t("optionFixHistoryLabel")}
+                    </div>
+                    {optionFixConversation.length > 0 ? (
+                      <div
+                        style={{
+                          maxHeight: 160,
+                          overflowY: "auto",
+                          padding: 8,
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        {optionFixConversation.map((turn) => (
+                          <div
+                            key={turn.timestamp}
+                            className="small"
+                            style={{ whiteSpace: "pre-wrap" }}
+                          >
+                            <strong>
+                              {turn.role === "user"
+                                ? t("optionFixRoleUser")
+                                : t("optionFixRoleAssistant")}
+                              :
+                            </strong>{" "}
+                            {turn.content}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="small"
+                        style={{
+                          border: "1px dashed var(--border)",
+                          borderRadius: 8,
+                          padding: 12,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {t("optionFixNoHistory")}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <div className="label" style={{ marginBottom: 4 }}>
+                      {t("optionFixFeedbackLabel")}
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={optionFixFeedback}
+                      onChange={(e) => setOptionFixFeedback(e.target.value)}
+                      placeholder={t("optionFixFeedbackPlaceholder")}
+                      disabled={optionFixConversation.length === 0}
+                    />
+                    <button
+                      type="button"
+                      style={{ marginTop: 6 }}
+                      onClick={() => runOptionFix("feedback")}
+                      disabled={
+                        optionFixBusy ||
+                        optionFixConversation.length === 0 ||
+                        optionFixFeedback.trim().length === 0
+                      }
+                    >
+                      {t("optionFixSendFeedback")}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1870,33 +2471,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 value={current.answer}
                 onChange={(e) => update({ answer: e.target.value })}
               />
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button
-                    onClick={() => fixLatex("answer")}
-                    disabled={!combinedOptionsAndAnswerFilled}
-                  >
-                    {t("latexFix")}
-                  </button>
-                  {llmStatusSource === "latex_answer" &&
-                    llmStatus !== "idle" &&
-                    llmStatus !== "done" && (
-                      <span className="small">
-                        {llmStatus === "waiting_response"
-                          ? t("waitingLLMResponse")
-                          : t("waitingLLMThinking")}
-                        {dotPattern}
-                      </span>
-                    )}
-                </div>
-                <span className="small">{t("latexFixHint")}</span>
-              </div>
               <div style={{ marginTop: 8 }}>
                 <div className="small" style={{ color: "var(--text-muted)" }}>
                   {t("mathJaxPreviewLabel")}
