@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAppStore } from '../state/store';
-import type { ProblemRecord } from '../state/store';
+import { useAppStore, DEFAULT_SUBFIELD_OPTIONS } from '../state/store';
+import type { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import * as XLSX from 'xlsx';
 import { downloadBlob } from '../lib/storage';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
+import { latexCorrection } from '../lib/llmAdapter';
 import {
   buildBatchLabel,
   collectFilesFromItems,
@@ -34,9 +35,333 @@ type ImportedRowPreview = {
   answer: string;
 };
 
+const DEFAULT_BATCH_LIMIT = '50';
+
+const OPTION_LABEL = (idx: number) => String.fromCharCode(65 + idx);
+
+const SUBFIELD_KEYWORDS: Record<string, string> = {
+  pointset: 'Point-Set Topology',
+  homotopy: 'Homotopy Theory',
+  homology: 'Homology Theory',
+  knot: 'Knot Theory',
+  lowdimensional: 'Low-Dimensional Topology',
+  geometric: 'Geometric Topology',
+  differential: 'Differential Topology',
+  foliation: 'Foliation Theory',
+  degree: 'Degree Theory'
+};
+
+const simplifyKey = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z]/g, '');
+
+const dedupeOrdered = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach((value) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    result.push(value);
+  });
+  return result;
+};
+
+async function ensureMathJaxReadyForBatch(): Promise<any | null> {
+  if (typeof window === 'undefined') return null;
+  const mj = (window as any).MathJax;
+  if (!mj) return null;
+  if (mj.startup?.promise) {
+    try {
+      await mj.startup.promise;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof mj.typesetPromise !== 'function') return null;
+  return mj;
+}
+
+async function collectMathJaxErrors(snippet: string): Promise<string[]> {
+  const source = snippet?.trim();
+  if (!source) return [];
+  if (typeof document === 'undefined') return [];
+  const mj = await ensureMathJaxReadyForBatch();
+  if (!mj) return [];
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.left = '-9999px';
+  container.style.width = '0';
+  container.style.height = '0';
+  container.style.overflow = 'hidden';
+  container.textContent = source;
+  document.body.appendChild(container);
+  try {
+    mj.texReset?.();
+    await mj.typesetPromise([container]);
+    const errors = Array.from(container.querySelectorAll('mjx-merror'))
+      .map(
+        (node) =>
+          node.getAttribute('data-mjx-error') ||
+          node.textContent?.trim() ||
+          ''
+      )
+      .filter((text) => text.length > 0);
+    return errors;
+  } catch {
+    return [];
+  } finally {
+    container.remove();
+  }
+}
+
+const composeLatexCorrectionPrompt = (
+  snippet: string,
+  reportLines?: string[],
+  contextLabel?: string
+): string => {
+  const lines: string[] = [];
+  lines.push('MathJax rendering is used in our application.');
+  lines.push(
+    'This may be an iterative session. Carry forward all previous improvements and integrate any feedback provided below.'
+  );
+  if (contextLabel) {
+    lines.push(`Context: ${contextLabel}`);
+  }
+  lines.push('MathJax render report:');
+  if (reportLines && reportLines.length > 0) {
+    reportLines.forEach((line, idx) => {
+      lines.push(`${idx + 1}. ${line}`);
+    });
+  } else {
+    lines.push(
+      'No explicit parser errors were reported. Please still ensure MathJax compatibility.'
+    );
+  }
+  lines.push('---');
+  lines.push('Original LaTeX snippet:');
+  lines.push(snippet);
+  return lines.join('\n');
+};
+
+const determineOptionCountForProblem = (
+  options: string[],
+  defaults: DefaultSettings
+): number => {
+  const baseline = Array.isArray(options) && options.length > 0 ? options.length : (defaults.optionsCount || 5);
+  return Math.max(2, baseline);
+};
+
+const buildOptionsAnswerSnippetForBatch = (
+  questionType: ProblemRecord['questionType'],
+  options: string[],
+  answer: string,
+  defaults: DefaultSettings
+): string => {
+  const trimmedAnswer = (answer ?? '').trim();
+  if (questionType !== 'Multiple Choice') {
+    return trimmedAnswer ? `Answer:\n${trimmedAnswer}` : '';
+  }
+  const optionCount = determineOptionCountForProblem(options, defaults);
+  const lines: string[] = [];
+  lines.push('Options:');
+  for (let i = 0; i < optionCount; i += 1) {
+    const body = (options?.[i] ?? '').trim();
+    lines.push(body ? `${OPTION_LABEL(i)}) ${body}` : `${OPTION_LABEL(i)})`);
+  }
+  lines.push('');
+  lines.push('Answer:');
+  lines.push(trimmedAnswer);
+  return lines.join('\n');
+};
+
+const parseOptionsAnswerSnippetForBatch = (
+  questionType: ProblemRecord['questionType'],
+  snippet: string,
+  defaults: DefaultSettings,
+  baseOptions: string[]
+): { options?: string[]; answer: string } => {
+  const normalized = snippet.replace(/\r\n/g, '\n').trim();
+  const answerLabelRegex = /(^|\n)\s*Answer\s*:\s*/i;
+  const match = answerLabelRegex.exec(normalized);
+  if (!match) {
+    return { answer: normalized };
+  }
+  const answerStart = match.index + match[0].length;
+  const answerText = normalized.slice(answerStart).trim();
+  if (questionType !== 'Multiple Choice') {
+    return { answer: answerText };
+  }
+  const optionsPartRaw = normalized
+    .slice(0, match.index)
+    .replace(/^\s*Options\s*:\s*/i, '')
+    .trim();
+  const optionCount = determineOptionCountForProblem(baseOptions, defaults);
+  const baseline = Array.from({ length: optionCount }, (_, idx) => baseOptions?.[idx] ?? '');
+  if (!optionsPartRaw) {
+    return { options: baseline, answer: answerText };
+  }
+  const updated = [...baseline];
+  const lines = optionsPartRaw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const assigned = new Set<number>();
+  const assignOption = (index: number, value: string) => {
+    if (index >= 0 && index < updated.length) {
+      updated[index] = value.trim();
+      assigned.add(index);
+      return true;
+    }
+    return false;
+  };
+  for (const line of lines) {
+    const labeled = line.match(/^([A-Z])[)\.\-:：、]?\s*(.*)$/);
+    if (labeled) {
+      const idx = labeled[1].charCodeAt(0) - 65;
+      if (assignOption(idx, labeled[2])) {
+        continue;
+      }
+    }
+    const nextIdx = updated.findIndex((_, idx) => !assigned.has(idx));
+    if (nextIdx !== -1) {
+      assignOption(nextIdx, line);
+    }
+  }
+  return { options: updated, answer: answerText };
+};
+
+const stripOptionLabel = (value: string, idx: number): string => {
+  const label = OPTION_LABEL(idx);
+  return value.replace(new RegExp(`^${label}[)\\.\\-:：、]?\\s*`, 'i'), '').trim();
+};
+
+const normalizeOptionList = (options: string[], defaults: DefaultSettings): string[] => {
+  const optionCount = determineOptionCountForProblem(options, defaults);
+  return Array.from({ length: optionCount }, (_, idx) =>
+    stripOptionLabel(options?.[idx] ?? '', idx)
+  );
+};
+
+const arraysEqual = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if ((a[i] ?? '') !== (b[i] ?? '')) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const tryParseJsonArray = (value: string): string[] => {
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item ?? ''));
+    }
+  } catch {
+    // ignore parsing failures
+  }
+  return [];
+};
+
+const normalizeMultipleChoiceAnswer = (raw: string): string => {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return '';
+  let tokens: string[] = [];
+  if (/^\s*\[/.test(trimmed)) {
+    tokens = tryParseJsonArray(trimmed);
+  }
+  if (!tokens.length) {
+    tokens = trimmed.split(/[,;，、\s|\/]+/);
+  }
+  const cleaned = tokens
+    .map((token) => token.trim().toUpperCase())
+    .filter((token) => /^[A-Z]$/.test(token));
+  const unique = Array.from(new Set(cleaned));
+  if (unique.length > 1) {
+    return unique.join(',');
+  }
+  if (unique.length === 1) {
+    return unique[0];
+  }
+  return trimmed.toUpperCase();
+};
+
+const normalizePresetValue = (raw: string, options: string[]): string => {
+  if (!options.length) return (raw ?? '').trim();
+  const fallback = options[0];
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return fallback;
+  const matched = options.find((item) => item.toLowerCase() === trimmed.toLowerCase());
+  return matched ?? fallback;
+};
+
+const mapSubfieldToken = (token: string): string => {
+  const trimmed = token.trim();
+  if (!trimmed) return '';
+  if (/^others/i.test(trimmed)) {
+    const payload = trimmed.replace(/^others[:：]?\s*/i, '').trim();
+    return payload ? `Others: ${payload}` : 'Others';
+  }
+  const simplified = simplifyKey(trimmed);
+  if (!simplified) return '';
+  const exact = DEFAULT_SUBFIELD_OPTIONS.find(
+    (item) => simplifyKey(item) === simplified
+  );
+  if (exact) return exact;
+  const keywordMatch = Object.entries(SUBFIELD_KEYWORDS).find(([keyword]) =>
+    simplified.includes(keyword) || keyword.includes(simplified)
+  );
+  if (keywordMatch) {
+    return keywordMatch[1];
+  }
+  return `Others: ${trimmed}`;
+};
+
+const normalizeSubfieldValue = (raw: string): string => {
+  const tokens = raw
+    .split(/[;，,、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!tokens.length) return '';
+  const normalized = tokens
+    .map(mapSubfieldToken)
+    .filter(Boolean);
+  return dedupeOrdered(normalized).join('; ');
+};
+
+const parseOptionsRawList = (raw?: string): string[] => {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item ?? ''));
+    }
+  } catch {
+    // swallow parsing errors; fall back to heuristics
+  }
+  const normalizedLabels = trimmed.replace(/([A-Z])[)\.\-:：、]\s*/g, '\n$1: ');
+  const normalizedBreaks = normalizedLabels
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/[;；|｜]/g, '\n');
+  const tokens = normalizedBreaks
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return tokens;
+};
+
+const deriveBaseOptions = (problem: ProblemRecord): string[] => {
+  const existing = Array.isArray(problem.options) ? [...problem.options] : [];
+  const hasContent = existing.some((opt) => (opt ?? '').trim().length > 0);
+  if (hasContent) return existing;
+  return parseOptionsRawList(problem.optionsRaw);
+};
+
 export function ImportExport() {
   const { t } = useTranslation();
-  const { problems, upsertProblem, patchProblem, currentId } = useAppStore();
+  const { problems, upsertProblem, patchProblem, currentId, defaults } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageDirInputRef = useRef<HTMLInputElement>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
@@ -49,6 +374,12 @@ export function ImportExport() {
   const [activePasteTarget, setActivePasteTarget] = useState<'xlsx' | 'images' | null>(null);
   const [isBatchRenaming, setIsBatchRenaming] = useState(false);
   const [bulkRenameMessage, setBulkRenameMessage] = useState<string | null>(null);
+  const [batchStartId, setBatchStartId] = useState('');
+  const [batchLimit, setBatchLimit] = useState(DEFAULT_BATCH_LIMIT);
+  const [autoFixing, setAutoFixing] = useState(false);
+  const [autoFixProgress, setAutoFixProgress] = useState<{ current: number; total: number; id?: string } | null>(null);
+  const [autoFixMessage, setAutoFixMessage] = useState<string | null>(null);
+  const [autoFixErrors, setAutoFixErrors] = useState<string[]>([]);
 
   useEffect(() => {
     const closeMenus = () => {
@@ -74,6 +405,201 @@ export function ImportExport() {
     el.setAttribute('webkitdirectory', '');
     el.setAttribute('directory', '');
   }, []);
+
+  useEffect(() => {
+    if (!problems.length) return;
+    setBatchStartId((prev) => (prev ? prev : problems[0].id));
+  }, [problems]);
+
+  const ensureLatexAgentConfigured = (): LLMAgentSettings | null => {
+    const latexAgent = useAppStore.getState().llmAgents.latex;
+    const cfg = latexAgent?.config;
+    if (cfg?.apiKey?.trim() && cfg?.model?.trim() && cfg?.baseUrl?.trim()) {
+      return latexAgent;
+    }
+    alert(`${t('llmMissingTitle')}: ${t('llmAgentMissingBody', { agent: t('agentLatex') })}`);
+    if (typeof document !== 'undefined') {
+      const anchor =
+        document.querySelector('[data-llm-config-section="true"]') ||
+        document.querySelector('.label');
+      anchor?.scrollIntoView({ behavior: 'smooth' });
+    }
+    return null;
+  };
+
+  const resolveBatchSelection = (): ProblemRecord[] => {
+    if (!problems.length) return [];
+    const trimmedStart = batchStartId.trim();
+    let startIndex = 0;
+    if (trimmedStart) {
+      startIndex = problems.findIndex((p) => p.id === trimmedStart);
+      if (startIndex === -1) {
+        throw new Error(t('bulkAutoFixInvalidStart', { id: trimmedStart }));
+      }
+    }
+    const parsedCount = parseInt(batchLimit, 10);
+    if (Number.isNaN(parsedCount) || parsedCount <= 0) {
+      throw new Error(t('bulkAutoFixInvalidCount'));
+    }
+    const endIndex = Math.min(problems.length, startIndex + parsedCount);
+    return problems.slice(startIndex, endIndex);
+  };
+
+  const buildAutoFixPatch = async (
+    problem: ProblemRecord,
+    latexAgent: LLMAgentSettings
+  ): Promise<Partial<ProblemRecord>> => {
+    const patch: Partial<ProblemRecord> = {};
+    const trimmedQuestion = (problem.question ?? '').trim();
+    if (trimmedQuestion) {
+      const report = await collectMathJaxErrors(trimmedQuestion);
+      const payload = composeLatexCorrectionPrompt(
+        trimmedQuestion,
+        report,
+        'Question field'
+      );
+      const corrected = (await latexCorrection(payload, latexAgent)).trim();
+      if (corrected && corrected !== problem.question) {
+        patch.question = corrected;
+      } else if (trimmedQuestion !== (problem.question ?? '')) {
+        patch.question = trimmedQuestion;
+      }
+    }
+
+    const sourceOptions = deriveBaseOptions(problem);
+    const normalizedBaseOptions =
+      problem.questionType === 'Multiple Choice'
+        ? normalizeOptionList(sourceOptions, defaults)
+        : [];
+    const answerSnippet = buildOptionsAnswerSnippetForBatch(
+      problem.questionType,
+      normalizedBaseOptions,
+      problem.answer ?? '',
+      defaults
+    );
+    if (answerSnippet.trim()) {
+      const report = await collectMathJaxErrors(answerSnippet);
+      const contextLabel =
+        problem.questionType === 'Multiple Choice'
+          ? 'Options and answer section'
+          : 'Answer section';
+      const payload = composeLatexCorrectionPrompt(
+        answerSnippet,
+        report,
+        contextLabel
+      );
+      const corrected = (await latexCorrection(payload, latexAgent)).trim();
+      if (corrected && corrected !== answerSnippet) {
+        const parsed = parseOptionsAnswerSnippetForBatch(
+          problem.questionType,
+          corrected,
+          defaults,
+          normalizedBaseOptions
+        );
+        if (problem.questionType === 'Multiple Choice' && parsed.options) {
+          patch.options = parsed.options;
+        }
+        patch.answer = parsed.answer;
+      }
+    }
+
+    const nextAnswer = (patch.answer ?? problem.answer ?? '').trim();
+    if ((patch.answer ?? problem.answer ?? '') !== nextAnswer) {
+      patch.answer = nextAnswer;
+    }
+
+    if (problem.questionType === 'Multiple Choice') {
+      const desiredOptions = patch.options ?? normalizedBaseOptions;
+      const normalizedOptions = normalizeOptionList(desiredOptions, defaults);
+      const storedOptions = Array.isArray(problem.options) ? problem.options : [];
+      const shouldUpdateOptions = !arraysEqual(normalizedOptions, storedOptions);
+      if (shouldUpdateOptions) {
+        patch.options = normalizedOptions;
+        patch.optionsRaw = '';
+      } else if ((problem.optionsRaw ?? '').trim().length > 0 && !patch.optionsRaw) {
+        patch.optionsRaw = '';
+      }
+      const normalizedAnswer = normalizeMultipleChoiceAnswer(
+        patch.answer ?? problem.answer ?? ''
+      );
+      if (normalizedAnswer !== (patch.answer ?? problem.answer ?? '')) {
+        patch.answer = normalizedAnswer;
+      }
+    }
+
+    const normalizedSubfield = normalizeSubfieldValue(problem.subfield ?? '');
+    if (normalizedSubfield !== (problem.subfield ?? '')) {
+      patch.subfield = normalizedSubfield;
+    }
+    const normalizedAcademic = normalizePresetValue(
+      problem.academicLevel ?? '',
+      defaults.academicLevels
+    );
+    if (normalizedAcademic !== (problem.academicLevel ?? '')) {
+      patch.academicLevel = normalizedAcademic;
+    }
+    const normalizedDifficulty = normalizePresetValue(
+      problem.difficulty ?? '',
+      defaults.difficultyOptions
+    );
+    if (normalizedDifficulty !== (problem.difficulty ?? '')) {
+      patch.difficulty = normalizedDifficulty;
+    }
+    return patch;
+  };
+
+  const runBulkAutoFix = async () => {
+    if (autoFixing) return;
+    const latexAgent = ensureLatexAgentConfigured();
+    if (!latexAgent) return;
+    let selection: ProblemRecord[];
+    try {
+      selection = resolveBatchSelection();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (!selection.length) {
+      alert(t('bulkAutoFixEmptyRange'));
+      return;
+    }
+    setAutoFixing(true);
+    setAutoFixProgress({ current: 0, total: selection.length, id: selection[0]?.id });
+    setAutoFixMessage(null);
+    setAutoFixErrors([]);
+    let updatedCount = 0;
+    const issues: string[] = [];
+    try {
+      for (let i = 0; i < selection.length; i += 1) {
+        const problem = selection[i];
+        setAutoFixProgress({ current: i, total: selection.length, id: problem.id });
+        try {
+          const patch = await buildAutoFixPatch(problem, latexAgent);
+          if (Object.keys(patch).length > 0) {
+            patchProblem(problem.id, patch);
+            updatedCount += 1;
+          }
+        } catch (error) {
+          issues.push(
+            `${problem.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      setAutoFixMessage(
+        t('bulkAutoFixSummary', {
+          processed: selection.length,
+          updated: updatedCount,
+          failed: issues.length
+        })
+      );
+      setAutoFixErrors(issues);
+    } finally {
+      setAutoFixProgress(null);
+      setAutoFixing(false);
+    }
+  };
 
   const normalizeExportImagePath = (value: string): string => normalizeImagePath(value);
   const normalizeImportedImagePath = (value: string): string => normalizeImagePath(value);
@@ -660,6 +1186,64 @@ export function ImportExport() {
         </div>
         {bulkRenameMessage && (
           <span className="small" style={{color:'var(--text-muted)'}}>{bulkRenameMessage}</span>
+        )}
+      </div>
+
+      <div className="card" style={{display:'flex', flexDirection:'column', gap:12}}>
+        <div className="row" style={{justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+          <div>
+            <div className="label" style={{marginBottom:4}}>{t('bulkAutoFixTitle')}</div>
+            <div className="small" style={{color:'var(--text-muted)'}}>{t('bulkAutoFixHint')}</div>
+          </div>
+          <button onClick={runBulkAutoFix} disabled={autoFixing}>
+            {autoFixing ? t('bulkAutoFixWorking') : t('bulkAutoFixButton')}
+          </button>
+        </div>
+        <div className="grid" style={{gap:8, gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))'}}>
+          <label className="small" style={{display:'flex', flexDirection:'column', gap:4}}>
+            <span>{t('bulkAutoFixStartId')}</span>
+            <input
+              type="text"
+              value={batchStartId}
+              onChange={(e) => setBatchStartId(e.target.value)}
+              placeholder={problems[0]?.id ?? ''}
+            />
+          </label>
+          <label className="small" style={{display:'flex', flexDirection:'column', gap:4}}>
+            <span>{t('bulkAutoFixLimit')}</span>
+            <input
+              type="number"
+              min={1}
+              value={batchLimit}
+              onChange={(e) => setBatchLimit(e.target.value)}
+              placeholder={DEFAULT_BATCH_LIMIT}
+            />
+          </label>
+        </div>
+        {autoFixProgress && (
+          <span className="small">
+            {t('bulkAutoFixProgress', {
+              current: Math.min(autoFixProgress.current + 1, autoFixProgress.total),
+              total: autoFixProgress.total,
+              id: autoFixProgress.id ?? t('bulkAutoFixUnknownId')
+            })}
+          </span>
+        )}
+        {autoFixMessage && (
+          <span className="small" style={{color:'var(--text-muted)'}}>{autoFixMessage}</span>
+        )}
+        {autoFixErrors.length > 0 && (
+          <div className="small" style={{color:'var(--danger, #b42318)'}}>
+            {t('bulkAutoFixErrorsLabel', { count: autoFixErrors.length })}
+            <ul style={{margin:'4px 0 0 16px'}}>
+              {autoFixErrors.slice(0, 3).map((err, idx) => (
+                <li key={`${err}-${idx}`}>{err}</li>
+              ))}
+            </ul>
+            {autoFixErrors.length > 3 && (
+              <span>{t('bulkAutoFixErrorsMore', { remaining: autoFixErrors.length - 3 })}</span>
+            )}
+          </div>
         )}
       </div>
 
