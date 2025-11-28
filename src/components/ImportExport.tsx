@@ -329,6 +329,36 @@ const normalizeSubfieldValue = (raw: string): string => {
   return dedupeOrdered(normalized).join('; ');
 };
 
+const parseOptionsRawList = (raw?: string): string[] => {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item ?? ''));
+    }
+  } catch {
+    // swallow parsing errors; fall back to heuristics
+  }
+  const normalizedLabels = trimmed.replace(/([A-Z])[)\.\-:：、]\s*/g, '\n$1: ');
+  const normalizedBreaks = normalizedLabels
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/[;；|｜]/g, '\n');
+  const tokens = normalizedBreaks
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return tokens;
+};
+
+const deriveBaseOptions = (problem: ProblemRecord): string[] => {
+  const existing = Array.isArray(problem.options) ? [...problem.options] : [];
+  const hasContent = existing.some((opt) => (opt ?? '').trim().length > 0);
+  if (hasContent) return existing;
+  return parseOptionsRawList(problem.optionsRaw);
+};
+
 export function ImportExport() {
   const { t } = useTranslation();
   const { problems, upsertProblem, patchProblem, currentId, defaults } = useAppStore();
@@ -345,7 +375,6 @@ export function ImportExport() {
   const [isBatchRenaming, setIsBatchRenaming] = useState(false);
   const [bulkRenameMessage, setBulkRenameMessage] = useState<string | null>(null);
   const [batchStartId, setBatchStartId] = useState('');
-  const [batchEndId, setBatchEndId] = useState('');
   const [batchLimit, setBatchLimit] = useState(DEFAULT_BATCH_LIMIT);
   const [autoFixing, setAutoFixing] = useState(false);
   const [autoFixProgress, setAutoFixProgress] = useState<{ current: number; total: number; id?: string } | null>(null);
@@ -380,7 +409,6 @@ export function ImportExport() {
   useEffect(() => {
     if (!problems.length) return;
     setBatchStartId((prev) => (prev ? prev : problems[0].id));
-    setBatchEndId((prev) => (prev ? prev : problems[problems.length - 1].id));
   }, [problems]);
 
   const ensureLatexAgentConfigured = (): LLMAgentSettings | null => {
@@ -402,7 +430,6 @@ export function ImportExport() {
   const resolveBatchSelection = (): ProblemRecord[] => {
     if (!problems.length) return [];
     const trimmedStart = batchStartId.trim();
-    const trimmedEnd = batchEndId.trim();
     let startIndex = 0;
     if (trimmedStart) {
       startIndex = problems.findIndex((p) => p.id === trimmedStart);
@@ -410,22 +437,12 @@ export function ImportExport() {
         throw new Error(t('bulkAutoFixInvalidStart', { id: trimmedStart }));
       }
     }
-    let endIndex = problems.length - 1;
-    if (trimmedEnd) {
-      endIndex = problems.findIndex((p) => p.id === trimmedEnd);
-      if (endIndex === -1) {
-        throw new Error(t('bulkAutoFixInvalidEnd', { id: trimmedEnd }));
-      }
+    const parsedCount = parseInt(batchLimit, 10);
+    if (Number.isNaN(parsedCount) || parsedCount <= 0) {
+      throw new Error(t('bulkAutoFixInvalidCount'));
     }
-    if (startIndex > endIndex) {
-      [startIndex, endIndex] = [endIndex, startIndex];
-    }
-    const slice = problems.slice(startIndex, endIndex + 1);
-    const parsedLimit = parseInt(batchLimit, 10);
-    if (!Number.isNaN(parsedLimit) && parsedLimit > 0) {
-      return slice.slice(0, Math.min(parsedLimit, slice.length));
-    }
-    return slice;
+    const endIndex = Math.min(problems.length, startIndex + parsedCount);
+    return problems.slice(startIndex, endIndex);
   };
 
   const buildAutoFixPatch = async (
@@ -449,10 +466,14 @@ export function ImportExport() {
       }
     }
 
-    const baseOptions = Array.isArray(problem.options) ? problem.options : [];
+    const sourceOptions = deriveBaseOptions(problem);
+    const normalizedBaseOptions =
+      problem.questionType === 'Multiple Choice'
+        ? normalizeOptionList(sourceOptions, defaults)
+        : [];
     const answerSnippet = buildOptionsAnswerSnippetForBatch(
       problem.questionType,
-      baseOptions,
+      normalizedBaseOptions,
       problem.answer ?? '',
       defaults
     );
@@ -473,7 +494,7 @@ export function ImportExport() {
           problem.questionType,
           corrected,
           defaults,
-          baseOptions
+          normalizedBaseOptions
         );
         if (problem.questionType === 'Multiple Choice' && parsed.options) {
           patch.options = parsed.options;
@@ -488,14 +509,14 @@ export function ImportExport() {
     }
 
     if (problem.questionType === 'Multiple Choice') {
-      const normalizedOptions = normalizeOptionList(
-        patch.options ?? baseOptions,
-        defaults
-      );
-      if (!arraysEqual(normalizedOptions, baseOptions)) {
+      const desiredOptions = patch.options ?? normalizedBaseOptions;
+      const normalizedOptions = normalizeOptionList(desiredOptions, defaults);
+      const storedOptions = Array.isArray(problem.options) ? problem.options : [];
+      const shouldUpdateOptions = !arraysEqual(normalizedOptions, storedOptions);
+      if (shouldUpdateOptions) {
         patch.options = normalizedOptions;
         patch.optionsRaw = '';
-      } else if (patch.options) {
+      } else if ((problem.optionsRaw ?? '').trim().length > 0 && !patch.optionsRaw) {
         patch.optionsRaw = '';
       }
       const normalizedAnswer = normalizeMultipleChoiceAnswer(
@@ -1178,7 +1199,7 @@ export function ImportExport() {
             {autoFixing ? t('bulkAutoFixWorking') : t('bulkAutoFixButton')}
           </button>
         </div>
-        <div className="grid" style={{gap:8, gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))'}}>
+        <div className="grid" style={{gap:8, gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))'}}>
           <label className="small" style={{display:'flex', flexDirection:'column', gap:4}}>
             <span>{t('bulkAutoFixStartId')}</span>
             <input
@@ -1186,15 +1207,6 @@ export function ImportExport() {
               value={batchStartId}
               onChange={(e) => setBatchStartId(e.target.value)}
               placeholder={problems[0]?.id ?? ''}
-            />
-          </label>
-          <label className="small" style={{display:'flex', flexDirection:'column', gap:4}}>
-            <span>{t('bulkAutoFixEndId')}</span>
-            <input
-              type="text"
-              value={batchEndId}
-              onChange={(e) => setBatchEndId(e.target.value)}
-              placeholder={problems[problems.length - 1]?.id ?? ''}
             />
           </label>
           <label className="small" style={{display:'flex', flexDirection:'column', gap:4}}>

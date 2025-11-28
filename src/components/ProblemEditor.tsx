@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -47,6 +49,11 @@ type GeneratorTurnState = GeneratorConversationTurn & {
 
 type QAHistoryTurn = ChatMessage & { timestamp: number };
 
+type NavDirection = "prev" | "next";
+
+const NAV_HOLD_DELAY_MS = 450;
+const NAV_HOLD_INTERVAL_MS = 150;
+
 export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const { t } = useTranslation();
   const store = useAppStore();
@@ -67,26 +74,133 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const hasNext = currentIndex >= 0; // enable Next; will create new at tail if needed
   const commitCurrent = () => {
     // Touch-save current problem so edits are persisted before navigation
-    store.upsertProblem({ id: current.id });
+    const snapshot = useAppStore.getState();
+    if (!snapshot.currentId) return;
+    snapshot.upsertProblem({ id: snapshot.currentId });
     setSavedAt(Date.now());
   };
   const goPrev = () => {
-    if (!hasPrev) return;
+    const snapshot = useAppStore.getState();
+    const currentId = snapshot.currentId;
+    if (!currentId) return;
+    const liveIndex = snapshot.problems.findIndex((p) => p.id === currentId);
+    if (liveIndex <= 0) return;
     commitCurrent();
-    store.upsertProblem({ id: store.problems[currentIndex - 1].id });
-  };
-  const goNext = () => {
-    if (!hasNext) return;
-    if (!ensureRequiredBeforeProceed()) return;
-    commitCurrent();
-    const isLast = currentIndex === store.problems.length - 1;
-    if (isLast) {
-      const newId = `${Date.now()}`;
-      store.upsertProblem({ id: newId }); // creates a new problem at the tail and jumps to it
-    } else {
-      store.upsertProblem({ id: store.problems[currentIndex + 1].id });
+    const targetId = snapshot.problems[liveIndex - 1]?.id;
+    if (targetId) {
+      snapshot.upsertProblem({ id: targetId });
     }
   };
+  const goNext = () => {
+    if (!ensureRequiredBeforeProceed()) return;
+    const snapshot = useAppStore.getState();
+    const currentId = snapshot.currentId;
+    if (!currentId) return;
+    const liveIndex = snapshot.problems.findIndex((p) => p.id === currentId);
+    if (liveIndex === -1) return;
+    commitCurrent();
+    const isLast = liveIndex === snapshot.problems.length - 1;
+    if (isLast) {
+      const newId = `${Date.now()}`;
+      snapshot.upsertProblem({ id: newId }); // creates a new problem at the tail and jumps to it
+    } else {
+      const targetId = snapshot.problems[liveIndex + 1]?.id;
+      if (targetId) {
+        snapshot.upsertProblem({ id: targetId });
+      }
+    }
+  };
+  const navHoldRef = useRef<Record<NavDirection, { timeout: number | null; interval: number | null; skipClick: boolean }>>({
+    prev: { timeout: null, interval: null, skipClick: false },
+    next: { timeout: null, interval: null, skipClick: false },
+  });
+  const clearHoldTimers = (direction: NavDirection) => {
+    const state = navHoldRef.current[direction];
+    if (state.timeout !== null) {
+      window.clearTimeout(state.timeout);
+      state.timeout = null;
+    }
+    if (state.interval !== null) {
+      window.clearInterval(state.interval);
+      state.interval = null;
+    }
+  };
+  const canNavigatePrevLive = () => {
+    const snapshot = useAppStore.getState();
+    const currentId = snapshot.currentId;
+    if (!currentId) return false;
+    const liveIndex = snapshot.problems.findIndex((p) => p.id === currentId);
+    return liveIndex > 0;
+  };
+  const triggerNav = (direction: NavDirection) => {
+    if (direction === "prev") {
+      goPrev();
+    } else {
+      goNext();
+    }
+  };
+  const startHoldNavigation = (direction: NavDirection, disabled?: boolean) => {
+    if (disabled) return;
+    if (direction === "prev" && !canNavigatePrevLive()) return;
+    clearHoldTimers(direction);
+    const state = navHoldRef.current[direction];
+    state.skipClick = false;
+    state.timeout = window.setTimeout(() => {
+      if (direction === "prev" && !canNavigatePrevLive()) {
+        state.skipClick = true;
+        clearHoldTimers(direction);
+        return;
+      }
+      state.skipClick = true;
+      triggerNav(direction);
+      state.interval = window.setInterval(() => {
+        if (direction === "prev" && !canNavigatePrevLive()) {
+          clearHoldTimers(direction);
+          return;
+        }
+        triggerNav(direction);
+      }, NAV_HOLD_INTERVAL_MS);
+    }, NAV_HOLD_DELAY_MS);
+  };
+  const stopHoldNavigation = (direction: NavDirection, expectClick = false) => {
+    if (!expectClick) {
+      navHoldRef.current[direction].skipClick = false;
+    }
+    clearHoldTimers(direction);
+  };
+  const handleNavClick = (direction: NavDirection, disabled?: boolean) => {
+    if (disabled) return;
+    const state = navHoldRef.current[direction];
+    if (state.skipClick) {
+      state.skipClick = false;
+      return;
+    }
+    triggerNav(direction);
+  };
+  const buildNavButtonProps = (direction: NavDirection, disabled: boolean) => ({
+    onMouseDown: (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return;
+      startHoldNavigation(direction, disabled);
+    },
+    onMouseUp: () => stopHoldNavigation(direction, true),
+    onMouseLeave: () => stopHoldNavigation(direction),
+    onTouchStart: () => startHoldNavigation(direction, disabled),
+    onTouchEnd: () => stopHoldNavigation(direction, true),
+    onTouchCancel: () => stopHoldNavigation(direction),
+    onBlur: () => stopHoldNavigation(direction),
+    onClick: () => handleNavClick(direction, disabled),
+    onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        triggerNav(direction);
+      }
+    },
+    disabled,
+  });
+  useEffect(() => () => {
+    clearHoldTimers("prev");
+    clearHoldTimers("next");
+  }, []);
   const [ocrText, setOcrText] = useState("");
   const [ocrImage, setOcrImage] = useState<Blob | null>(null);
   const [ocrPreviewUrl, setOcrPreviewUrl] = useState<string>("");
@@ -1465,10 +1579,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             >
               {t("back")}
             </button>
-            <button onClick={goPrev} disabled={!hasPrev}>
+            <button {...buildNavButtonProps("prev", !hasPrev)}>
               {t("prev")}
             </button>
-            <button onClick={goNext}>{t("next")}</button>
+            <button {...buildNavButtonProps("next", false)}>{t("next")}</button>
           </div>
           <span className="small">
             {t("previewFieldId")}: {current.id}
@@ -1592,10 +1706,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
           className="row"
           style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
         >
-          <button onClick={goPrev} disabled={!hasPrev}>
+          <button {...buildNavButtonProps("prev", !hasPrev)}>
             {t("prev")}
           </button>
-          <button onClick={goNext}>{t("next")}</button>
+          <button {...buildNavButtonProps("next", false)}>{t("next")}</button>
           <span className="small">ID: {current.id}</span>
           {savedAt && <span className="badge">{t("saved")}</span>}
         </div>
