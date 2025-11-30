@@ -392,6 +392,12 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (contextLabel) {
       lines.push(`Context: ${contextLabel}`);
     }
+    const lowerContext = (contextLabel || "").toLowerCase();
+    if (lowerContext.includes("option")) {
+      lines.push(
+        "When an answer references option labels, multiple correct labels are allowed. Keep every uppercase letter and separate multiples with commas without spaces (e.g., A,B,C). Never drop or add spaces between letters.",
+      );
+    }
     lines.push("MathJax render report:");
     if (reportLines && reportLines.length > 0) {
       reportLines.forEach((line, idx) => {
@@ -439,6 +445,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         lines.push(body ? `${label}) ${body}` : `${label})`);
       });
       lines.push("");
+      lines.push(
+        "Answer format hint: keep every correct option label in uppercase and separate multiples with commas without spaces (e.g., A,B,C).",
+      );
     }
     lines.push("Answer:");
     lines.push(answerText ?? "");
@@ -527,11 +536,13 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return [
       "You normalize multiple-choice options so they follow strict labeling rules.",
       "Always respond with JSON using double quotes:",
-      '{"options":[{"label":"A","text":"..."}],"answer":"A","notes":""}',
+      '{"options":[{"label":"A","text":"..."}],"answer":"A,B","notes":""}',
       `Produce exactly ${targetCount} options labeled sequentially from A to ${finalLabel}.`,
       `Preserve MathJax commands, punctuation, and ordering whenever possible.`,
       `If there are fewer than ${targetCount} candidates, fill the remaining slots with a single backslash (\\\\).`,
       `If there are more than ${targetCount}, drop extra options beyond ${finalLabel} unless the correct answer sits outside that range—move that option (its text and correctness) into a random slot within A-${finalLabel} first.`,
+      "The answer field may contain multiple uppercase labels separated by commas with no spaces (e.g., A,B,C). Preserve every provided label unless an option is truly removed.",
+      "Never drop, reorder, or insert spaces between answer letters; only remove a letter if its option has been deleted.",
       "Return notes only if there is important context; never add commentary outside the JSON.",
     ].join("\n");
   };
@@ -567,7 +578,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       `2. Preserve math/latex content verbatim; only fix obvious spacing.`,
       `3. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
       `4. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
-      '5. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
+      '5. When multiple labels are correct, keep every uppercase letter and separate them with commas without spaces (e.g., A,B,C); never discard letters unless the corresponding option is removed.',
+      '6. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
     ]
       .filter(Boolean)
       .join("\n");

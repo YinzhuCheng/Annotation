@@ -8,7 +8,7 @@ export interface OptionFragment {
   source: OptionFragmentSource;
 }
 
-export const DEFAULT_OPTION_PLACEHOLDER = '//';
+export const DEFAULT_OPTION_PLACEHOLDER = '\\\\';
 
 const toOptionLabel = (index: number): string => {
   const bounded = Math.max(0, Math.min(LETTERS.length - 1, index));
@@ -145,18 +145,17 @@ export function extractOptionFragments(raw: string | string[] | null): OptionFra
 export const formatOptionFragmentsSummary = (fragments: OptionFragment[]): string[] =>
   fragments.map((frag) => `${frag.label} -> ${frag.text || '<empty>'}`);
 
-const sanitizeAnswerList = (value: string | null | undefined): string[] => {
+export const sanitizeAnswerList = (value: string | null | undefined): string[] => {
   if (value == null) return [];
   const raw = String(value).trim();
   if (!raw) return [];
   const parsedArray = normalizeJsonLikeArray(raw);
-  const sourceTokens =
-    parsedArray && parsedArray.length > 0
-      ? parsedArray
-      : raw
-          .split(/[^A-Za-z]+/)
-          .map((token) => token.trim())
-          .filter(Boolean);
+  const fallbackTokens = raw
+    .split(/[^A-Za-z]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length === 1);
+
+  const sourceTokens = parsedArray && parsedArray.length > 0 ? parsedArray : fallbackTokens;
   const letters: string[] = [];
   sourceTokens.forEach((token) => {
     const normalized = normalizeLabel(token);
