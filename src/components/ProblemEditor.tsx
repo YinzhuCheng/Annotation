@@ -72,6 +72,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const overallDraftConfig = useAppStore((s) => s.overallDraftConfig);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [jumpIdInput, setJumpIdInput] = useState("");
   const current = useMemo(
     () => store.problems.find((p) => p.id === store.currentId)!,
     [store.problems, store.currentId],
@@ -119,6 +120,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         snapshot.upsertProblem({ id: targetId });
       }
     }
+  };
+
+  const handleJumpToProblem = () => {
+    if (!ensureRequiredBeforeProceed()) return;
+    const trimmed = jumpIdInput.trim();
+    if (!trimmed) return;
+    const snapshot = useAppStore.getState();
+    const targetExists = snapshot.problems.find((p) => p.id === trimmed);
+    if (!targetExists) {
+      alert(`Problem ID "${trimmed}" not found.`);
+      return;
+    }
+    commitCurrent();
+    snapshot.upsertProblem({ id: trimmed });
+    setJumpIdInput("");
   };
   const navHoldRef = useRef<Record<NavDirection, { timeout: number | null; interval: number | null; skipClick: boolean }>>({
     prev: { timeout: null, interval: null, skipClick: false },
@@ -739,6 +755,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     });
     setOptionFixUndoVersion((v) => v + 1);
     update({ options: nextOptions, answer: nextAnswer, optionsRaw: rawSource });
+    commitCurrent();
     setOptionFixNotices(
       notices.filter((note, idx, arr) => note && arr.indexOf(note) === idx),
     );
@@ -2166,6 +2183,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             {t("prev")}
           </button>
           <button {...buildNavButtonProps("next", false)}>{t("next")}</button>
+          <div className="row" style={{ gap: 4, alignItems: "center" }}>
+            <input
+              value={jumpIdInput}
+              onChange={(e) => setJumpIdInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleJumpToProblem();
+                }
+              }}
+              placeholder="Problem ID"
+              style={{ width: 140 }}
+            />
+            <button onClick={handleJumpToProblem}>{t("jump") || "Jump"}</button>
+          </div>
           <span className="small">ID: {current.id}</span>
           {savedAt && <span className="badge">{t("saved")}</span>}
         </div>
