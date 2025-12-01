@@ -127,6 +127,9 @@ const composeLatexCorrectionPrompt = (
   if (contextLabel) {
     lines.push(`Context: ${contextLabel}`);
   }
+  lines.push(
+    'Inline mathematics must always be wrapped in \\( ... \\) so MathJax renders correctly. Avoid switching to $$ $$ or stripping math fences.',
+  );
   lines.push('MathJax render report:');
   if (reportLines && reportLines.length > 0) {
     reportLines.forEach((line, idx) => {

@@ -409,6 +409,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       lines.push(`Context: ${contextLabel}`);
     }
     const lowerContext = (contextLabel || "").toLowerCase();
+    lines.push(
+      "Inline mathematics must always be wrapped in \\( ... \\) so MathJax renders it correctly. Do not remove existing math fences and do not switch to $$ $$.",
+    );
     if (lowerContext.includes("option")) {
       lines.push(
         "When an answer references option labels, multiple correct labels are allowed. Keep every uppercase letter and separate multiples with commas without spaces (e.g., A,B,C). Never drop or add spaces between letters.",
@@ -555,6 +558,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       '{"options":[{"label":"A","text":"..."}],"answer":"A,B","notes":""}',
       `Produce exactly ${targetCount} options labeled sequentially from A to ${finalLabel}.`,
       `Preserve MathJax commands, punctuation, and ordering whenever possible.`,
+      "If you introduce inline math, wrap it in \\( ... \\) so MathJax renders correctly. Never switch to $$ $$ or strip required math fences.",
       `If there are fewer than ${targetCount} candidates, fill the remaining slots with a single backslash (\\\\).`,
       `If there are more than ${targetCount}, drop extra options beyond ${finalLabel} unless the correct answer sits outside that range—move that option (its text and correctness) into a random slot within A-${finalLabel} first.`,
       "The answer field may contain multiple uppercase labels separated by commas with no spaces (e.g., A,B,C). Preserve every provided label unless an option is truly removed.",
@@ -592,10 +596,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       "Rules:",
       `1. Output exactly ${targetCount} labeled options (A-${finalLabel}).`,
       `2. Preserve math/latex content verbatim; only fix obvious spacing.`,
-      `3. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
-      `4. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
-      '5. When multiple labels are correct, keep every uppercase letter and separate them with commas without spaces (e.g., A,B,C); never discard letters unless the corresponding option is removed.',
-      '6. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
+      '3. Inline math must be wrapped in \\( ... \\) so MathJax renders correctly—never switch to $$ $$ or drop the delimiters.',
+      `4. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
+      `5. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
+      '6. When multiple labels are correct, keep every uppercase letter and separate them with commas without spaces (e.g., A,B,C); never discard letters unless the corresponding option is removed.',
+      '7. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
     ]
       .filter(Boolean)
       .join("\n");
