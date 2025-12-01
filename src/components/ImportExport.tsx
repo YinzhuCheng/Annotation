@@ -8,6 +8,7 @@ import { downloadBlob } from '../lib/storage';
 import { getImageBlob, saveImageBlobAtPath } from '../lib/db';
 import JSZip from 'jszip';
 import { latexCorrection } from '../lib/llmAdapter';
+import { DEFAULT_OPTION_PLACEHOLDER } from '../lib/optionsCorrection';
 import {
   buildBatchLabel,
   collectFilesFromItems,
@@ -126,6 +127,9 @@ const composeLatexCorrectionPrompt = (
   if (contextLabel) {
     lines.push(`Context: ${contextLabel}`);
   }
+  lines.push(
+    'Inline mathematics must always be wrapped in \\( ... \\) so MathJax renders correctly. Avoid switching to $$ $$ or stripping math fences.',
+  );
   lines.push('MathJax render report:');
   if (reportLines && reportLines.length > 0) {
     reportLines.forEach((line, idx) => {
@@ -239,6 +243,32 @@ const normalizeOptionList = (options: string[], defaults: DefaultSettings): stri
   return Array.from({ length: optionCount }, (_, idx) =>
     stripOptionLabel(options?.[idx] ?? '', idx)
   );
+};
+
+const formatOptionsForExport = (
+  problem: ProblemRecord,
+  defaults: DefaultSettings
+): string => {
+  if (problem.questionType !== 'Multiple Choice') return '';
+  const desiredCount = Math.max(2, defaults.optionsCount || 5);
+  const storedOptions = Array.isArray(problem.options) ? problem.options : [];
+  const normalized = Array.from({ length: desiredCount }, (_, idx) =>
+    stripOptionLabel(String(storedOptions[idx] ?? '').trim(), idx)
+  );
+  const isFilled = (value: string): boolean => {
+    const trimmed = value.trim();
+    return trimmed.length > 0 && trimmed !== DEFAULT_OPTION_PLACEHOLDER;
+  };
+  const allFilled = normalized.length === desiredCount && normalized.every(isFilled);
+  const hasAnyContent = normalized.some(isFilled);
+  if (!allFilled && !hasAnyContent) {
+    return (problem.optionsRaw ?? '').trim();
+  }
+  const finalized = allFilled
+    ? normalized
+    : normalized.map((value) => (isFilled(value) ? value : DEFAULT_OPTION_PLACEHOLDER));
+  const labeled = finalized.map((value, idx) => `${OPTION_LABEL(idx)}: ${value}`);
+  return JSON.stringify(labeled);
 };
 
 const arraysEqual = (a: string[], b: string[]): boolean => {
@@ -715,17 +745,8 @@ export function ImportExport() {
     .map(p => {
       const question = String(p.question ?? '');
       const questionType = p.questionType;
-      const optionsSerialized = p.optionsRaw?.trim()
-        ? p.optionsRaw
-        : questionType === 'Multiple Choice'
-          ? JSON.stringify((p.options || []).map((opt, i) => {
-              const label = String.fromCharCode(65 + i);
-              const trimmed = String(opt || '').trim();
-              if (!trimmed) return '';
-              const hasPrefix = new RegExp(`^${label}\\s*:`).test(trimmed);
-              return hasPrefix ? trimmed : `${label}: ${trimmed}`;
-            }))
-          : '';
+      const optionsSerialized =
+        questionType !== 'Multiple Choice' ? '' : formatOptionsForExport(p, defaults);
       const answer = String(p.answer ?? '');
       const subfield = String(p.subfield ?? '');
       const source = String(p.source ?? '');

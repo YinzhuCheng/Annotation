@@ -1,6 +1,7 @@
 import { DefaultSettings, LLMAgentSettings, ProblemRecord } from '../state/store';
 import { chatStream } from './llmAdapter';
 import type { ChatContent, ImageUrlContent } from './llmAdapter';
+import { sanitizeAnswerList } from './optionsCorrection';
 
 const FORMAT_FIX_RETRY_LIMIT = 3;
 
@@ -603,7 +604,37 @@ export async function generateProblemFromText(
         })
       : [];
 
-    let answer = sanitizeText(extracted.answer);
+    const extractAnswerFromStructured = (value: string): string => {
+      const match = value.match(/answer\s*[:=]\s*(['"])(.*?)\1/i);
+      if (match) {
+        return match[2]?.trim() ?? '';
+      }
+      const quotedSegment = value.match(/(['"])(.*?)\1/);
+      if (quotedSegment) {
+        return quotedSegment[2]?.trim() ?? '';
+      }
+      return '';
+    };
+
+    const normalizeAnswerField = (value: string): string => {
+      const trimmedValue = value?.trim() ?? '';
+      if (!trimmedValue) return '';
+
+      if (questionType === 'Multiple Choice') {
+        const letters = sanitizeAnswerList(trimmedValue);
+        if (letters.length > 0) return letters.join(',');
+      }
+
+      if (trimmedValue.startsWith('{') || trimmedValue.startsWith('[')) {
+        const structured = extractAnswerFromStructured(trimmedValue);
+        if (structured) return structured;
+        return '';
+      }
+
+      return trimmedValue;
+    };
+
+    let answer = normalizeAnswerField(extracted.answer);
     if (!answer) {
       answer = existingAnswer || '';
     }

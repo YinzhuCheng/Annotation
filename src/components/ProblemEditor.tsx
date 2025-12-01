@@ -72,6 +72,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const overallDraftConfig = useAppStore((s) => s.overallDraftConfig);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [jumpIdInput, setJumpIdInput] = useState("");
   const current = useMemo(
     () => store.problems.find((p) => p.id === store.currentId)!,
     [store.problems, store.currentId],
@@ -119,6 +120,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         snapshot.upsertProblem({ id: targetId });
       }
     }
+  };
+
+  const handleJumpToProblem = () => {
+    if (!ensureRequiredBeforeProceed()) return;
+    const trimmed = jumpIdInput.trim();
+    if (!trimmed) return;
+    const snapshot = useAppStore.getState();
+    const targetExists = snapshot.problems.find((p) => p.id === trimmed);
+    if (!targetExists) {
+      alert(`Problem ID "${trimmed}" not found.`);
+      return;
+    }
+    commitCurrent();
+    snapshot.upsertProblem({ id: trimmed });
+    setJumpIdInput("");
   };
   const navHoldRef = useRef<Record<NavDirection, { timeout: number | null; interval: number | null; skipClick: boolean }>>({
     prev: { timeout: null, interval: null, skipClick: false },
@@ -392,6 +408,15 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     if (contextLabel) {
       lines.push(`Context: ${contextLabel}`);
     }
+    const lowerContext = (contextLabel || "").toLowerCase();
+    lines.push(
+      "Inline mathematics must always be wrapped in \\( ... \\) so MathJax renders it correctly. Do not remove existing math fences and do not switch to $$ $$.",
+    );
+    if (lowerContext.includes("option")) {
+      lines.push(
+        "When an answer references option labels, multiple correct labels are allowed. Keep every uppercase letter and separate multiples with commas without spaces (e.g., A,B,C). Never drop or add spaces between letters.",
+      );
+    }
     lines.push("MathJax render report:");
     if (reportLines && reportLines.length > 0) {
       reportLines.forEach((line, idx) => {
@@ -439,6 +464,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
         lines.push(body ? `${label}) ${body}` : `${label})`);
       });
       lines.push("");
+      lines.push(
+        "Answer format hint: keep every correct option label in uppercase and separate multiples with commas without spaces (e.g., A,B,C).",
+      );
     }
     lines.push("Answer:");
     lines.push(answerText ?? "");
@@ -527,11 +555,14 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     return [
       "You normalize multiple-choice options so they follow strict labeling rules.",
       "Always respond with JSON using double quotes:",
-      '{"options":[{"label":"A","text":"..."}],"answer":"A","notes":""}',
+      '{"options":[{"label":"A","text":"..."}],"answer":"A,B","notes":""}',
       `Produce exactly ${targetCount} options labeled sequentially from A to ${finalLabel}.`,
       `Preserve MathJax commands, punctuation, and ordering whenever possible.`,
+      "If you introduce inline math, wrap it in \\( ... \\) so MathJax renders correctly. Never switch to $$ $$ or strip required math fences.",
       `If there are fewer than ${targetCount} candidates, fill the remaining slots with a single backslash (\\\\).`,
       `If there are more than ${targetCount}, drop extra options beyond ${finalLabel} unless the correct answer sits outside that range—move that option (its text and correctness) into a random slot within A-${finalLabel} first.`,
+      "The answer field may contain multiple uppercase labels separated by commas with no spaces (e.g., A,B,C). Preserve every provided label unless an option is truly removed.",
+      "Never drop, reorder, or insert spaces between answer letters; only remove a letter if its option has been deleted.",
       "Return notes only if there is important context; never add commentary outside the JSON.",
     ].join("\n");
   };
@@ -565,9 +596,11 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       "Rules:",
       `1. Output exactly ${targetCount} labeled options (A-${finalLabel}).`,
       `2. Preserve math/latex content verbatim; only fix obvious spacing.`,
-      `3. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
-      `4. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
-      '5. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
+      '3. Inline math must be wrapped in \\( ... \\) so MathJax renders correctly—never switch to $$ $$ or drop the delimiters.',
+      `4. If there are fewer than ${targetCount} items, fill remaining slots with "\\".`,
+      `5. If there are more than ${targetCount}, keep only A-${finalLabel} unless the correct answer sits beyond that range; in that case reassign it into the top range before trimming.`,
+      '6. When multiple labels are correct, keep every uppercase letter and separate them with commas without spaces (e.g., A,B,C); never discard letters unless the corresponding option is removed.',
+      '7. Respond with strict JSON matching {"options":[...],"answer":"X","notes":""} and nothing else.',
     ]
       .filter(Boolean)
       .join("\n");
@@ -727,6 +760,7 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
     });
     setOptionFixUndoVersion((v) => v + 1);
     update({ options: nextOptions, answer: nextAnswer, optionsRaw: rawSource });
+    commitCurrent();
     setOptionFixNotices(
       notices.filter((note, idx, arr) => note && arr.indexOf(note) === idx),
     );
@@ -2154,6 +2188,21 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
             {t("prev")}
           </button>
           <button {...buildNavButtonProps("next", false)}>{t("next")}</button>
+          <div className="row" style={{ gap: 4, alignItems: "center" }}>
+            <input
+              value={jumpIdInput}
+              onChange={(e) => setJumpIdInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleJumpToProblem();
+                }
+              }}
+              placeholder="Problem ID"
+              style={{ width: 140 }}
+            />
+            <button onClick={handleJumpToProblem}>{t("jump") || "Jump"}</button>
+          </div>
           <span className="small">ID: {current.id}</span>
           {savedAt && <span className="badge">{t("saved")}</span>}
         </div>
