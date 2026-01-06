@@ -26,7 +26,7 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 button, select, input, textarea { background:var(--btn-bg); border:1px solid var(--border); color:var(--fg); border-radius:8px; padding:8px 10px; }
 button { cursor:pointer; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.container { max-width: 1560px; margin: 0 auto; padding: 16px; }
 .grid { display:grid; gap:16px; }
 .grid-2 { grid-template-columns: 1fr 1fr; }
 .options-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -44,6 +44,34 @@ textarea { width:100%; min-height:120px; resize: vertical; }
 .list li { margin: 8px 0; }
 .dropzone { padding: 24px; border: 1px dashed var(--border); text-align:center; border-radius: 12px; }
 img.preview { max-width: 100%; max-height: 60vh; height: auto; object-fit: contain; border-radius: 8px; border:1px solid var(--border); }
+
+/* --- Screenshot-friendly Assist Tools bar --- */
+.assist-tools-shell { padding: 12px 16px; }
+.assist-tools-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  align-items: stretch;
+  scroll-snap-type: x proximity;
+}
+.assist-tools-row::-webkit-scrollbar { height: 10px; }
+.assist-tools-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.assist-tools-row::-webkit-scrollbar-track { background: transparent; }
+
+.assist-tool-panel {
+  flex: 0 0 420px;
+  min-width: 380px;
+  max-width: 520px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+  scroll-snap-align: start;
+}
+.assist-tool-panel textarea { min-height: 110px; }
+.assist-tool-panel .dropzone { padding: 12px; }
 
 /* Prevent grid/flex children from causing overflow due to intrinsic min-width */
 .grid > * { min-width: 0; }
