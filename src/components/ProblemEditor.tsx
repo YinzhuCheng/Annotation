@@ -1594,186 +1594,6 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
       </div>
 
       <div className="assist-tool-panel">
-        <div
-          className="label"
-          style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
-        >
-          {t("qaAssistantTitle")}
-        </div>
-        <div className="small" style={{ color: "var(--text-muted)" }}>
-          {t("qaAssistantHint")}
-        </div>
-        <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
-          <button
-            type="button"
-            onClick={clearQaConversation}
-            disabled={qaConversation.length === 0 && qaInput.trim().length === 0}
-          >
-            {t("qaAssistantClear")}
-          </button>
-          <button type="button" className="ghost" onClick={() => toggleTool("qa")}>
-            {toolCollapse.qa ? t("expandSection") : t("collapseSection")}
-          </button>
-        </div>
-        {!toolCollapse.qa && (
-          <>
-            {qaStatus !== "idle" && qaStatus !== "done" && (
-              <span className="small" style={{ color: "var(--text-muted)" }}>
-                {qaStatus === "waiting_response"
-                  ? t("waitingLLMResponse")
-                  : t("waitingLLMThinking")}
-                {dotPattern}
-              </span>
-            )}
-            {qaConversation.length > 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  maxHeight: 220,
-                  overflowY: "auto",
-                  marginTop: 8,
-                }}
-              >
-                {qaConversation.map((turn) => (
-                  <div
-                    key={turn.timestamp}
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      padding: 8,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                    }}
-                  >
-                    <div className="small" style={{ fontWeight: 600 }}>
-                      {turn.role === "user"
-                        ? t("qaAssistantUserLabel")
-                        : t("qaAssistantAgentLabel")}
-                    </div>
-                    <div className="small" style={{ whiteSpace: "pre-wrap" }}>
-                      {describeChatContent(turn.content)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="small" style={{ color: "var(--text-muted)", marginTop: 8 }}>
-                {t("qaAssistantEmpty")}
-              </div>
-            )}
-            {qaError && (
-              <span className="small" style={{ color: "#f87171" }}>
-                {t("qaAssistantError", { message: qaError })}
-              </span>
-            )}
-            <textarea
-              value={qaInput}
-              onChange={(e) => setQaInput(e.target.value)}
-              rows={3}
-              placeholder={t("qaAssistantInputPlaceholder")}
-              style={{ marginTop: 8 }}
-            />
-            <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
-              <button
-                type="button"
-                className="primary"
-                onClick={askQaAssistant}
-                disabled={
-                  qaInput.trim().length === 0 ||
-                  qaStatus === "waiting_response" ||
-                  qaStatus === "thinking" ||
-                  qaStatus === "responding"
-                }
-              >
-                {t("qaAssistantSend")}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="assist-tool-panel">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <div className="label" style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600 }}>
-            {t("assistToolTranslation")}
-          </div>
-          <button type="button" className="ghost" onClick={() => toggleTool("translation")}>
-            {toolCollapse.translation ? t("expandSection") : t("collapseSection")}
-          </button>
-        </div>
-        {!toolCollapse.translation && (
-          <>
-            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <button type="button" onClick={() => loadTranslationFrom("question")}>
-                {t("translationLoadQuestion")}
-              </button>
-              <button type="button" onClick={() => loadTranslationFrom("answer")}>
-                {t("translationLoadAnswer")}
-              </button>
-              <select
-                value={translationTarget}
-                onChange={(e) => setTranslationTarget(e.target.value as "en" | "zh")}
-              >
-                <option value="zh">{t("translationTargetZh")}</option>
-                <option value="en">{t("translationTargetEn")}</option>
-              </select>
-            </div>
-            {translationError && (
-              <span className="small" style={{ color: "#f87171" }}>
-                {translationError}
-              </span>
-            )}
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-              <div>
-                <div className="label" style={{ marginBottom: 4 }}>
-                  {t("translationInputLabel")}
-                </div>
-                <textarea
-                  value={translationInput}
-                  onChange={(e) => setTranslationInput(e.target.value)}
-                  rows={6}
-                />
-              </div>
-              <div>
-                <div className="label" style={{ marginBottom: 4 }}>
-                  {t("translationOutputLabel")}
-                </div>
-                <textarea
-                  value={translationOutput}
-                  onChange={(e) => setTranslationOutput(e.target.value)}
-                  rows={6}
-                />
-              </div>
-            </div>
-            <div className="row" style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                <button type="button" className="primary" onClick={runTranslation}>
-                  {t("translationRun")}
-                </button>
-                {translationStatus !== "idle" && translationStatus !== "done" && (
-                  <span className="small">
-                    {translationStatus === "waiting_response"
-                      ? t("waitingLLMResponse")
-                      : t("waitingLLMThinking")}
-                    {dotPattern}
-                  </span>
-                )}
-              </div>
-              <button type="button" onClick={() => translationOutput && update({ question: translationOutput })}>
-                {t("translationApplyQuestion")}
-              </button>
-              <button type="button" onClick={() => translationOutput && update({ answer: translationOutput })}>
-                {t("translationApplyAnswer")}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="assist-tool-panel">
         <div className="label" style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}>
           {t("assistToolLatex")}
         </div>
@@ -2752,11 +2572,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               />
             </div>
           )}
-          {!shouldPortalAssistTools && (
-            <div
-              className="card"
-              style={{ display: "flex", flexDirection: "column", gap: 12 }}
-            >
+          <div
+            className="card"
+            style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          >
             <div>
               <div
                 className="label"
@@ -2774,7 +2593,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
               )}
             </div>
 
-            <div>
+            {!shouldPortalAssistTools && (
+              <>
+                <div>
               <div
                 className="label"
                 style={{ marginBottom: 4, fontSize: "1.05rem", fontWeight: 600 }}
@@ -3056,8 +2877,10 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                   </div>
                 </>
               )}
-            </div>
-            <hr className="div" style={{ margin: "12px 0" }} />
+                </div>
+                <hr className="div" style={{ margin: "12px 0" }} />
+              </>
+            )}
             <div
               style={{
                 marginTop: 12,
@@ -3346,6 +3169,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </>
               )}
             </div>
+            {!shouldPortalAssistTools && (
+              <>
             <hr className="div" style={{ margin: "12px 0" }} />
             <div>
               <div
@@ -3637,8 +3462,9 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
                 </>
               )}
             </div>
+              </>
+            )}
           </div>
-          )}
 
           <div
             className="row"
