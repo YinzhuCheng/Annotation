@@ -45,6 +45,34 @@ textarea { width:100%; min-height:120px; resize: vertical; }
 .dropzone { padding: 24px; border: 1px dashed var(--border); text-align:center; border-radius: 12px; }
 img.preview { max-width: 100%; max-height: 60vh; height: auto; object-fit: contain; border-radius: 8px; border:1px solid var(--border); }
 
+/* --- Screenshot-friendly Assist Tools bar --- */
+.assist-tools-shell { padding: 12px 16px; }
+.assist-tools-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  align-items: stretch;
+  scroll-snap-type: x proximity;
+}
+.assist-tools-row::-webkit-scrollbar { height: 10px; }
+.assist-tools-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.assist-tools-row::-webkit-scrollbar-track { background: transparent; }
+
+.assist-tool-panel {
+  flex: 0 0 380px;
+  min-width: 320px;
+  max-width: 480px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+  scroll-snap-align: start;
+}
+.assist-tool-panel textarea { min-height: 110px; }
+.assist-tool-panel .dropzone { padding: 12px; }
+
 /* Prevent grid/flex children from causing overflow due to intrinsic min-width */
 .grid > * { min-width: 0; }
 .grid-2 > * { min-width: 0; }

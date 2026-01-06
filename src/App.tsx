@@ -87,6 +87,18 @@ export default function App() {
           </div>
         </div>
 
+        <div className="card assist-tools-shell">
+          <div className="row" style={{justifyContent:'space-between', alignItems:'center', marginBottom: 8}}>
+            <div className="label" style={{margin: 0}}>{t('assistToolsTitle')}</div>
+          </div>
+          {t('llmAssistGenerateHint') && t('llmAssistGenerateHint').trim().length > 0 && (
+            <div className="small" style={{margin: '0 0 8px 0', color: 'var(--text-muted)'}}>
+              {t('llmAssistGenerateHint')}
+            </div>
+          )}
+          <div id="assist-tools-dock" className="assist-tools-row" />
+        </div>
+
         <div className="card">
           <div className="row" style={{justifyContent:'space-between', alignItems:'center'}}>
             <div className="row" style={{gap:8, alignItems:'center'}}>
