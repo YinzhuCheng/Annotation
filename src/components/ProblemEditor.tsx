@@ -301,8 +301,8 @@ export function ProblemEditor({ onOpenClear }: { onOpenClear?: () => void }) {
   const [latexErrors, setLatexErrors] = useState<string[]>([]);
   const [toolCollapse, setToolCollapse] = useState({
     generator: false,
-    qa: false,
-    translation: false,
+    qa: true,
+    translation: true,
     latex: false,
     ocr: false,
   });
